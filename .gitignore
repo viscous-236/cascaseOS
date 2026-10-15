@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# SQLite database files (never commit live/sandbox DB)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+data/
+
+# Environment secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Plan files (internal, not for submission)
+./plan
