@@ -31,4 +31,4 @@ Thumbs.db
 *.swo
 
 # Plan files (internal, not for submission)
-./plan
+plan/
