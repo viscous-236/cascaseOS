@@ -137,12 +137,16 @@ async function paypalRequest<T = unknown>(
   }
 
   let response: Response;
+  const requestInit: RequestInit = {
+    method,
+    headers,
+  };
+  if (options.body !== undefined) {
+    requestInit.body = JSON.stringify(options.body);
+  }
+
   try {
-    response = await fetch(url, {
-      method,
-      headers,
-      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-    });
+    response = await fetch(url, requestInit);
   } catch (networkError) {
     throw new Error(
       `PayPalInvoicingService: network error [${method} ${url}]: ${String(networkError)}`

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "channel3-api": {
+      "source": "channel3-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/channel3-api/SKILL.md",
+      "computedHash": "6319a64b6b5d5471c613df76a0596819fcdb2d7fe95a593b99d5972e560c55c1"
+    },
+    "paypal-integration": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "skillPath": "plugins/payment-processing/skills/paypal-integration/SKILL.md",
+      "computedHash": "dd80cfc7dd31d6d57af2eef7227a7ada6ba52c2682c4e1d9502ec0b35ee3502f"
+    },
+    "repo-research": {
+      "source": "rhysmcneill/agentic-ai-library",
+      "sourceType": "github",
+      "skillPath": "groups/open-source-contrib/skills/repo-research/SKILL.md",
+      "computedHash": "88673e71ccad6612df1a82b375761f0c2d18cf5276f88b1c476909c68d57b744"
+    }
+  }
+}

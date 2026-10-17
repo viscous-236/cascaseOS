@@ -53,6 +53,23 @@ export function getDb(): Database.Database {
 }
 
 /**
+ * Sets or clears the active database instance (primarily for tests).
+ */
+export function setDbForTesting(db: Database.Database | null): void {
+  _db = db;
+}
+
+/**
+ * Closes the active database connection if open.
+ */
+export function closeDatabase(): void {
+  if (_db) {
+    _db.close();
+    _db = null;
+  }
+}
+
+/**
  * Initialises the SQLite database:
  * 1. Creates the data directory if it doesn't exist.
  * 2. Opens/creates the SQLite file at env.DATABASE_PATH.

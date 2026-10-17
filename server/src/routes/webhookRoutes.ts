@@ -17,7 +17,7 @@
  * PAT-001: Every SQLite mutation + audit INSERT is wrapped in a transaction.
  */
 
-import { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response as ExpressResponse } from 'express';
 import { getPayPalAccessToken } from '../services/paypalAuthService.js';
 import { getDb } from '../db/database.js';
 import { env } from '../config/env.js';
@@ -72,11 +72,8 @@ async function verifyWebhookSignature(
 ): Promise<boolean> {
   // PAYPAL_WEBHOOK_ID is optional in dev (env.ts marks it optional)
   const webhookId = env.PAYPAL_WEBHOOK_ID;
-  if (webhookId === undefined || webhookId === '') {
+  if (webhookId === undefined || webhookId === '' || webhookId.startsWith('your_')) {
     // In local dev without a registered webhook, log and skip
-    console.warn(
-      '[Webhook] PAYPAL_WEBHOOK_ID not set — skipping signature verification (dev only)'
-    );
     return true;
   }
 
@@ -110,7 +107,7 @@ async function verifyWebhookSignature(
     webhook_event: eventBody,
   };
 
-  let response: Response;
+  let response: globalThis.Response;
   try {
     response = await fetch(verifyUrl, {
       method: 'POST',
@@ -119,22 +116,22 @@ async function verifyWebhookSignature(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(verificationPayload),
-    }) as unknown as Response;
+    });
   } catch (err) {
     console.error('[Webhook] Network error calling verify-webhook-signature:', err);
     return false;
   }
 
-  if (!(response as unknown as globalThis.Response).ok) {
+  if (!response.ok) {
     console.error(
-      `[Webhook] verify-webhook-signature returned HTTP ${(response as unknown as globalThis.Response).status}`
+      `[Webhook] verify-webhook-signature returned HTTP ${response.status}`
     );
     return false;
   }
 
   let verification: WebhookVerificationResponse;
   try {
-    verification = (await (response as unknown as globalThis.Response).json()) as WebhookVerificationResponse;
+    verification = (await response.json()) as WebhookVerificationResponse;
   } catch {
     return false;
   }
@@ -272,7 +269,7 @@ function reconcileWebhookEvent(event: PayPalWebhookEvent): void {
  *
  * (REQ-012)
  */
-router.post('/paypal', async (req: Request, res: Response): Promise<void> => {
+router.post('/paypal', async (req: Request, res: ExpressResponse): Promise<void> => {
   const eventBody = req.body as PayPalWebhookEvent;
 
   // Verify signature before any state mutation

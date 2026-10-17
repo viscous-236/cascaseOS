@@ -10,10 +10,17 @@
  */
 
 import { config } from 'dotenv';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-// Load .env file (no-op in production where env vars are injected directly)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env file (try cwd first, then monorepo root)
 config();
+config({ path: resolve(__dirname, '../../../.env') });
+config({ path: resolve(__dirname, '../../.env') });
 
 const envSchema = z.object({
   // ─── Server ─────────────────────────────────────────────────────────────────
@@ -63,12 +70,29 @@ const envSchema = z.object({
   CHANNEL3_API_BASE_URL: z
     .string()
     .url()
-    .default('https://api.trychannel3.com/v0'),
+    .default('https://api.trychannel3.com/v1'),
 
-  // ─── LLM ─────────────────────────────────────────────────────────────────────
-  OPENAI_API_KEY: z.string().min(1, 'OPENAI_API_KEY is required'),
+  // ─── LLM (Groq / OpenAI) ───────────────────────────────────────────────────
+  OPENAI_API_KEY: z.string().optional(),
 
-  OPENAI_MODEL: z.string().default('gpt-4o'),
+  GROQ_API_KEY: z.string().optional(),
+
+  OPENAI_BASE_URL: z.string().url().optional(),
+
+  OPENAI_MODEL: z.string().default('openai/gpt-oss-120b'),
+}).transform((raw) => {
+  const apiKey = raw.GROQ_API_KEY || raw.OPENAI_API_KEY || '';
+  const isGroq = Boolean(raw.GROQ_API_KEY || apiKey.startsWith('gsk_'));
+  const baseUrl = raw.OPENAI_BASE_URL || (isGroq ? 'https://api.groq.com/openai/v1' : undefined);
+  const model = raw.OPENAI_MODEL || (isGroq ? 'openai/gpt-oss-120b' : 'gpt-4o');
+
+  return {
+    ...raw,
+    OPENAI_API_KEY: apiKey,
+    OPENAI_BASE_URL: baseUrl,
+    OPENAI_MODEL: model,
+    IS_GROQ: isGroq,
+  };
 });
 
 /**
@@ -78,6 +102,11 @@ const envSchema = z.object({
 const parseResult = envSchema.safeParse(process.env);
 
 if (!parseResult.success) {
+  if (process.env.NODE_ENV === 'test') {
+    throw new Error(
+      `CascadeOS invalid test environment configuration: ${JSON.stringify(parseResult.error.format())}`
+    );
+  }
   console.error('❌  CascadeOS startup failed — invalid environment configuration:');
   console.error(parseResult.error.format());
   process.exit(1);
