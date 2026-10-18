@@ -1,4 +1,14 @@
 import { defineConfig } from 'vitest/config';
+import { config } from 'dotenv';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load live .env from monorepo root
+config({ path: resolve(__dirname, '../.env') });
+config();
 
 export default defineConfig({
   test: {
@@ -6,14 +16,10 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     reporters: ['verbose'],
+    testTimeout: 35000,
+    hookTimeout: 35000,
     env: {
       NODE_ENV: 'test',
-      PAYPAL_CLIENT_ID: 'sb-test-client-id-001',
-      PAYPAL_CLIENT_SECRET: 'sb-test-client-secret-001',
-      PAYPAL_API_BASE_URL: 'https://api-m.sandbox.paypal.com',
-      CHANNEL3_API_KEY: 'test-channel3-key-001',
-      OPENAI_API_KEY: 'test-openai-key-001',
     },
   },
 });
-

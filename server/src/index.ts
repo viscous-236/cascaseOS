@@ -1,37 +1,120 @@
 /**
  * @file index.ts
- * @description CascadeOS Express server entry point.
+ * @description CascadeOS Express Server Entrypoint (TASK-024, ARC-004).
  *
- * Phase 1: Skeleton only — database init + health check.
- * Full route wiring added in Phase 5 (TASK-024).
+ * Implements:
+ * - CORS configuration allowing frontend Vite access
+ * - Raw body buffer preservation on JSON parser for PayPal webhook HMAC verification (REQ-012)
+ * - Routing table mounting:
+ *   - /api (project, scenario, recovery, studio agent)
+ *   - /api/webhooks (PayPal webhooks)
+ * - Automatic SQLite database initialization on boot
+ * - Clean global error handler
+ * - Exported `app` for supertest integration testing
  */
 
-import express from 'express';
+import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { initDatabase } from './db/database.js';
 import { env } from './config/env.js';
 
-const app = express();
+import projectRouter from './routes/projectRoutes.js';
+import scenarioRouter from './routes/scenarioRoutes.js';
+import recoveryRouter from './routes/recoveryRoutes.js';
+import studioAgentRouter from './routes/studioAgentRoutes.js';
+import webhookRouter from './routes/webhookRoutes.js';
+
+export const app = express();
 
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
-app.use(cors());
-app.use(express.json());
+
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'PayPal-Request-Id', 'x-api-key'],
+  })
+);
+
+// Preserve raw body buffer for PayPal webhook signature calculation (REQ-012, SEC-008)
+app.use(
+  express.json({
+    verify: (req: Request & { rawBody?: Buffer }, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // ---------------------------------------------------------------------------
-// Boot
+// Route Mounting (ARC-004)
 // ---------------------------------------------------------------------------
-async function start(): Promise<void> {
+
+// Projects & Health (GET /api/health, POST /api/projects/bootstrap, GET /api/projects/:projectId/state)
+app.use('/api', projectRouter);
+
+// Scenario Triggers (POST /api/scenarios/:scenarioId/trigger)
+app.use('/api', scenarioRouter);
+
+// Recovery Plans & PayPal Orders (POST /api/recovery-plans/..., POST /api/paypal/orders/...)
+app.use('/api', recoveryRouter);
+
+// AG Studio Agent Chat (POST /api/studio-agent/chat)
+app.use('/api', studioAgentRouter);
+
+// PayPal Webhooks (POST /api/webhooks/paypal)
+app.use('/api/webhooks', webhookRouter);
+
+// ---------------------------------------------------------------------------
+// 404 Handler
+// ---------------------------------------------------------------------------
+
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    error: `Endpoint not found: ${req.method} ${req.originalUrl}`,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Global Error Handler
+// ---------------------------------------------------------------------------
+
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error('[ServerError]', err);
+  const message = err instanceof Error ? err.message : String(err);
+  res.status(500).json({
+    error: 'Internal server error',
+    message,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server Startup
+// ---------------------------------------------------------------------------
+
+export async function startServer(): Promise<void> {
   await initDatabase();
 
-  app.listen(env.PORT, () => {
-    console.log(`🚀  CascadeOS server running on port ${env.PORT} [${env.NODE_ENV}]`);
+  const server = app.listen(env.PORT, () => {
+    console.log(`🚀  CascadeOS Server running on http://localhost:${env.PORT} [${env.NODE_ENV}]`);
     console.log(`📦  Database: ${env.DATABASE_PATH}`);
+    console.log(`🤖  LLM Provider: ${env.IS_GROQ ? 'Groq (openai/gpt-oss-120b)' : 'OpenAI (' + env.OPENAI_MODEL + ')'}`);
+    console.log(`💳  PayPal Sandbox: ${env.PAYPAL_API_BASE_URL}`);
+    console.log(`🛒  Channel3 API: ${env.CHANNEL3_API_BASE_URL}`);
+  });
+
+  return new Promise((resolve) => {
+    server.on('listening', resolve);
   });
 }
 
-start().catch((err: unknown) => {
-  console.error('Fatal startup error:', err);
-  process.exit(1);
-});
+// Start automatically if executed directly (not when imported by tests)
+if (process.env.NODE_ENV !== 'test' && import.meta.url === `file://${process.argv[1]}`) {
+  startServer().catch((err: unknown) => {
+    console.error('Fatal startup error:', err);
+    process.exit(1);
+  });
+}
+
+export default app;

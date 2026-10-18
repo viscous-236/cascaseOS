@@ -240,5 +240,8 @@ export async function searchAndAuditSupplierProducts(
     quotes.push(quote);
   }
 
+  // Sort discovered quotes ascending by unit price (best arbitrage first)
+  quotes.sort((a, b) => a.unit_price_minor - b.unit_price_minor);
+
   return quotes;
 }

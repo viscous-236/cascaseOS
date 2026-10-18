@@ -38,7 +38,7 @@ export interface CreateOrderParams {
   /** Unit price in integer minor units */
   unitPriceMinor: number;
   /** Optional: the unique invoice reference shown to the buyer */
-  invoiceReference?: string;
+  invoiceReference?: string | undefined;
 }
 
 export interface PayPalOrderCapture {
