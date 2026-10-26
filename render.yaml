@@ -1,0 +1,40 @@
+# Render Infrastructure-as-Code Blueprint for CascadeOS (TASK-039, CON-005)
+services:
+  - type: web
+    name: cascade-os
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    disk:
+      name: cascade-sqlite-data
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: DATABASE_PATH
+        value: /var/data/cascade_os.sqlite
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: CHANNEL3_BASE_URL
+        value: https://api.trychannel3.com/v0
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: openai/gpt-oss-120b
+      - key: OPENAI_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: VITE_PAYPAL_CLIENT_ID
+        sync: false

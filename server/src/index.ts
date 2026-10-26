@@ -23,6 +23,9 @@ import scenarioRouter from './routes/scenarioRoutes.js';
 import recoveryRouter from './routes/recoveryRoutes.js';
 import studioAgentRouter from './routes/studioAgentRoutes.js';
 import webhookRouter from './routes/webhookRoutes.js';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
 
 export const app = express();
 
@@ -65,6 +68,36 @@ app.use('/api', studioAgentRouter);
 
 // PayPal Webhooks (POST /api/webhooks/paypal)
 app.use('/api/webhooks', webhookRouter);
+
+// ---------------------------------------------------------------------------
+// Static Client Serving in Production
+// ---------------------------------------------------------------------------
+
+function resolveClientDistPath(): string | null {
+  const candidates = [
+    resolve(process.cwd(), 'client/dist'),
+    resolve(process.cwd(), '../client/dist'),
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../client/dist'),
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../client/dist'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      return c;
+    }
+  }
+  return null;
+}
+
+const clientDistPath = resolveClientDistPath();
+if (clientDistPath) {
+  app.use(express.static(clientDistPath));
+  app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(resolve(clientDistPath, 'index.html'));
+  });
+}
 
 // ---------------------------------------------------------------------------
 // 404 Handler

@@ -113,7 +113,12 @@ router.post(
     let qrCodeBase64: string | null = blockedTask.qr_code_base64;
     const paypalInvoiceId = blockedTask.paypal_invoice_id;
 
-    if (paypalInvoiceId && !paypalInvoiceId.startsWith('INV2-MOCK')) {
+    const isPlaceholderInvoice = !paypalInvoiceId ||
+      paypalInvoiceId.startsWith('INV2-PHASE-') ||
+      paypalInvoiceId.startsWith('INV2-FALLBACK-') ||
+      paypalInvoiceId.startsWith('INV2-MOCK-');
+
+    if (paypalInvoiceId && !isPlaceholderInvoice) {
       try {
         console.log(`[Recovery] Updating PayPal Sandbox invoice ${paypalInvoiceId} for materials unlock...`);
         const currentInv = await getInvoice(paypalInvoiceId);
@@ -143,9 +148,15 @@ router.post(
         );
 
         console.log(`[Recovery] PayPal invoice updated, QR generated, and reminder sent successfully.`);
-      } catch (err) {
-        console.warn('[Recovery] PayPal live invoice update warning (continuing SQLite execution):', err);
+      } catch (err: any) {
+        if (err?.message?.includes('403') || err?.message?.includes('NOT_AUTHORIZED')) {
+          console.warn('[Recovery] PayPal Invoicing API permission not toggled in developer portal (Orders v2 active). Continuing with SQLite state update.');
+        } else {
+          console.warn('[Recovery] PayPal live invoice update warning (continuing SQLite execution):', err);
+        }
       }
+    } else if (isPlaceholderInvoice) {
+      console.log(`[Recovery] Demo invoice ${paypalInvoiceId} detected — executing deterministic SQLite materials unlock & schedule reroute.`);
     }
 
     // 5. Atomic SQLite State Update & Audit Logging (PAT-001)

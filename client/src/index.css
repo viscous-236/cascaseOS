@@ -1,0 +1,154 @@
+@import '@bryntum/gantt/stockholm-dark.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+:root.light {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.dark body {
+  background-color: #07090e;
+  color: #f8fafc;
+}
+
+.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #0c0e14;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 3px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Bryntum Gantt Dark Mode */
+.dark .b-gantt {
+  background-color: #0c0e14 !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.dark .b-grid-header,
+.dark .b-grid-header-container {
+  background-color: #090b10 !important;
+  color: #a1a1aa !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.dark .b-grid-row {
+  background-color: #0c0e14 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
+  color: #f4f4f5 !important;
+}
+
+.dark .b-grid-row.b-selected {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+}
+
+/* Bryntum Gantt Light Mode */
+.light .b-gantt {
+  background-color: #ffffff !important;
+  color: #18181b !important;
+  border: 1px solid #e4e4e7 !important;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.light .b-grid-header,
+.light .b-grid-header-container {
+  background-color: #f4f4f5 !important;
+  color: #71717a !important;
+  border-bottom: 1px solid #e4e4e7 !important;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.light .b-grid-row {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #f4f4f5 !important;
+  color: #18181b !important;
+}
+
+.light .b-grid-row.b-selected {
+  background-color: rgba(16, 185, 129, 0.08) !important;
+}
+
+.b-gantt-task {
+  border-radius: 6px !important;
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* Status-specific bar colors */
+.b-gantt-task.status-completed {
+  background: #10b981 !important;
+  border: 1px solid #059669 !important;
+}
+
+.b-gantt-task.status-payment-blocked {
+  background: #f43f5e !important;
+  border: 1px solid #e11d48 !important;
+}
+
+.b-gantt-task.status-rerouted-active {
+  background: #0ea5e9 !important;
+  border: 1px solid #0284c7 !important;
+}
+
+.b-gantt-task.status-ready-to-promote {
+  background: #f59e0b !important;
+  border: 1px solid #d97706 !important;
+}
+
+.b-gantt-task.status-materials-ordered {
+  background: #8b5cf6 !important;
+  border: 1px solid #7c3aed !important;
+}

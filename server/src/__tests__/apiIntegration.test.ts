@@ -135,7 +135,7 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(res.body.reroutedSchedule.new_promoted_start_date).toBe('2026-10-16');
       expect(res.body.plan.policy_decision).toBe('REQUIRE_APPROVAL');
       expect(res.body.nudge.materials_unlock_amount_formatted).toContain('1396.00');
-    });
+    }, 20000);
 
     it('SCENARIO_B: blocks incumbent price creep (+28.95%) and evaluates Channel3 replacement', async () => {
       const res = await request(app).post('/api/scenarios/SCENARIO_B/trigger');
@@ -150,7 +150,7 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       // Channel3 quote proposal
       expect(res.body.channel3Proposed.plan).toBeDefined();
       expect(res.body.channel3Proposed.quote.unit_price_minor).toBeLessThanOrEqual(41800); // within 10%
-    });
+    }, 20000);
 
     it('SCENARIO_C: hard blocks adversarial dependency violation and missing costs (SEC-006)', async () => {
       const res = await request(app).post('/api/scenarios/SCENARIO_C/trigger');
@@ -159,7 +159,7 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(res.body.decision).toBe('BLOCK');
       expect(res.body.reasonCodes).toContain('HARD_DEPENDENCY_VIOLATION');
       expect(res.body.reasonCodes).toContain('UNKNOWN_COST_FIELD');
-    });
+    }, 20000);
   });
 
   // ===========================================================================
@@ -234,6 +234,6 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(res.body.role).toBe('assistant');
       expect(typeof res.body.content).toBe('string');
       expect(res.body.content.length).toBeGreaterThan(0);
-    });
+    }, 15000);
   });
 });

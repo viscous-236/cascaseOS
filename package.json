@@ -13,7 +13,8 @@
     "start": "npm run start --workspace=server",
     "test": "npm run test --workspace=server",
     "typecheck": "npm run typecheck --workspace=server && npm run typecheck --workspace=client",
-    "verify:sandbox": "npm run verify:sandbox --workspace=server"
+    "verify:sandbox": "npm run verify:sandbox --workspace=server",
+    "reset:db": "node -e \"import('node:fs').then(fs => { ['server/data/cascade_os.sqlite', 'server/data/cascade_os.sqlite-wal', 'server/data/cascade_os.sqlite-shm', 'data/cascade_os.sqlite', 'data/cascade_os.sqlite-wal', 'data/cascade_os.sqlite-shm'].forEach(f => { try { fs.unlinkSync(f); } catch {} }); console.log('SQLite database wiped successfully. Starting server will initialize a fresh database.'); })\""
   },
   "devDependencies": {
     "concurrently": "^9.0.1",

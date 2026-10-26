@@ -12,7 +12,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,7 +34,23 @@ import type {
 // ---------------------------------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const SCHEMA_PATH = resolve(__dirname, 'schema.sql');
+
+function resolveSchemaPath(): string {
+  const candidates = [
+    resolve(__dirname, 'schema.sql'),
+    resolve(__dirname, '../../src/db/schema.sql'),
+    resolve(process.cwd(), 'server/src/db/schema.sql'),
+    resolve(process.cwd(), 'src/db/schema.sql'),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return resolve(__dirname, 'schema.sql');
+}
+
+const SCHEMA_PATH = resolveSchemaPath();
 
 // ---------------------------------------------------------------------------
 // Database singleton
@@ -127,6 +143,38 @@ export const ProjectRepo = {
     return getDb()
       .prepare<[], Project>('SELECT * FROM projects ORDER BY created_at DESC')
       .all();
+  },
+
+  findAllWithSummary(): Array<
+    Project & {
+      total_tasks: number;
+      overdue_invoices_count: number;
+      total_exposure_minor: number;
+      total_arbitrage_savings_minor: number;
+    }
+  > {
+    const projects = ProjectRepo.findAll();
+    return projects.map((proj) => {
+      const tasks = TaskRepo.findByProject(proj.project_id);
+      const overdueTasks = tasks.filter((t) => t.paypal_invoice_status === 'OVERDUE');
+      const exposureMinor = overdueTasks.reduce(
+        (sum, t) => sum + (t.duration_days * t.daily_idle_burn_minor) + t.sla_delay_penalty_minor,
+        0
+      );
+      const quotes = QuoteRepo.findByProject(proj.project_id);
+      const savingsMinor = quotes.reduce(
+        (sum, q) => sum + Math.max(0, q.savings_vs_incumbent_minor),
+        0
+      );
+
+      return {
+        ...proj,
+        total_tasks: tasks.length,
+        overdue_invoices_count: overdueTasks.length,
+        total_exposure_minor: exposureMinor,
+        total_arbitrage_savings_minor: savingsMinor,
+      };
+    });
   },
 
   insert(project: Omit<Project, 'created_at' | 'updated_at'>): Project {
@@ -243,6 +291,59 @@ export const TaskRepo = {
       )
       .run({ task_id: taskId, ...patch });
   },
+
+  /** Full task field update for interactive Bryntum editing */
+  update(taskId: string, patch: Partial<CascadeTask>): CascadeTask {
+    const existing = TaskRepo.findById(taskId);
+    if (!existing) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+
+    const updated: CascadeTask = {
+      ...existing,
+      ...patch,
+      task_id: existing.task_id,
+      project_id: existing.project_id,
+      version: existing.version + 1,
+    };
+
+    getDb()
+      .prepare(
+        `UPDATE tasks SET
+          name = @name,
+          start_date = @start_date,
+          end_date = @end_date,
+          duration_days = @duration_days,
+          materials_in_warehouse = @materials_in_warehouse,
+          crew_assigned = @crew_assigned,
+          daily_idle_burn_minor = @daily_idle_burn_minor,
+          sla_delay_penalty_minor = @sla_delay_penalty_minor,
+          phase_hardware_budget_max_minor = @phase_hardware_budget_max_minor,
+          schedule_status = @schedule_status,
+          paypal_invoice_id = @paypal_invoice_id,
+          paypal_invoice_number = @paypal_invoice_number,
+          paypal_invoice_status = @paypal_invoice_status,
+          invoice_total_minor = @invoice_total_minor,
+          materials_unlock_minor = @materials_unlock_minor,
+          deferred_labor_minor = @deferred_labor_minor,
+          client_name = @client_name,
+          client_email = @client_email,
+          qr_code_base64 = @qr_code_base64,
+          last_nudge_message = @last_nudge_message,
+          last_nudge_sent_at = @last_nudge_sent_at,
+          sku_search_query = @sku_search_query,
+          required_quantity = @required_quantity,
+          incumbent_vendor_name = @incumbent_vendor_name,
+          incumbent_unit_price_minor = @incumbent_unit_price_minor,
+          historical_unit_price_minor = @historical_unit_price_minor,
+          max_allowed_variance_pct = @max_allowed_variance_pct,
+          version = @version
+        WHERE task_id = @task_id`
+      )
+      .run(updated);
+
+    return updated;
+  },
 };
 
 // ===========================================================================
@@ -267,6 +368,20 @@ export const DependencyRepo = {
            (@dependency_id, @project_id, @from_task_id, @to_task_id, @lag_days)`
       )
       .run(dep);
+  },
+
+  deleteById(dependencyId: string): void {
+    getDb()
+      .prepare('DELETE FROM task_dependencies WHERE dependency_id = ?')
+      .run(dependencyId);
+  },
+
+  deleteByEdge(projectId: string, fromTaskId: string, toTaskId: string): void {
+    getDb()
+      .prepare(
+        'DELETE FROM task_dependencies WHERE project_id = ? AND from_task_id = ? AND to_task_id = ?'
+      )
+      .run(projectId, fromTaskId, toTaskId);
   },
 };
 

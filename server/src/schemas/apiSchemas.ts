@@ -44,6 +44,8 @@ export const triggerScenarioSchema = z.object({
   }),
   body: z
     .object({
+      projectId: z.string().optional(),
+      targetTaskId: z.string().optional(),
       forceRefresh: z.boolean().optional().default(false),
     })
     .default({}),

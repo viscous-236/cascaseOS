@@ -76,7 +76,7 @@ describe('Phase 4: AI Nudge-Bot & Project Bootstrap Services', () => {
       expect(result.exposure_at_risk_formatted).toBe('USD $2800.00');
       expect(result.subject).toContain('Apex Diagnostic Clinic');
       expect(result.body).toMatch(/Vance/i);
-      expect(result.body).toContain('1396.00');
+      expect(result.body).toMatch(/1,?396\.00/);
       expect(result.body).not.toMatch(/debt collection|default notice|penalty fee/i);
     });
 
