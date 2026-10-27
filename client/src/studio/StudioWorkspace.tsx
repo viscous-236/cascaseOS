@@ -23,8 +23,27 @@ import {
 } from 'lucide-react';
 
 export const StudioWorkspace: React.FC = () => {
-  const { state, isRefreshing, refreshState } = useCascadeState();
+  const { state, isRefreshing, refreshState, theme } = useCascadeState();
   const [studioMode, setStudioMode] = useState<'edit' | 'view'>('edit');
+  const workspaceTheme = useMemo(() => {
+    const dark = theme === 'dark';
+    return studioTheme.withParams({
+      fontFamily: 'Geist, sans-serif', fontSize: 13,
+      backgroundColor: dark ? '#202224' : '#ffffff',
+      textColor: dark ? '#f0f1f2' : '#202326',
+      borderColor: dark ? '#34383b' : '#e3e6e8',
+      studioCanvasBackgroundColor: dark ? '#18191b' : '#f3f4f5',
+      studioCanvasFontFamily: 'Geist, sans-serif',
+      studioWidgetBackgroundColor: dark ? '#202224' : '#ffffff',
+      studioWidgetTitleFontFamily: 'Geist, sans-serif',
+      studioWidgetTitleFontSize: 16,
+      studioWidgetTitleTextColor: dark ? '#f0f1f2' : '#202326',
+      studioToggleButtonActiveBackgroundColor: dark ? '#303436' : '#eceef0',
+      studioToggleButtonActiveColor: dark ? '#f0f1f2' : '#202326',
+      chartFontFamily: 'Geist, sans-serif',
+      chartPaletteFills1Color: dark ? '#8fb9f8' : '#1d5fbf',
+    });
+  }, [theme]);
 
   // Format data sources for AG Studio Data Engine
   const studioData = useMemo(() => {
@@ -85,28 +104,29 @@ export const StudioWorkspace: React.FC = () => {
   }, [state?.tasks, state?.supplierQuotes, state?.auditEvents]);
 
   return (
-    <div className="flex flex-col h-[700px] w-full bg-white dark:bg-[#0c0e14] border border-neutral-200 dark:border-white/[0.08] rounded-2xl overflow-hidden shadow-sm transition-colors duration-200">
+    <div className="studio-shell flex flex-col h-[760px] w-full">
       {/* Decongested Header */}
-      <div className="flex flex-wrap items-center justify-between px-5 py-2.5 bg-neutral-50 dark:bg-[#090b10] border-b border-neutral-200 dark:border-white/[0.08]">
+      <div className="studio-toolbar">
         <div className="flex items-center space-x-2.5">
           <div className="w-6 h-6 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300">
             <LayoutDashboard className="w-3.5 h-3.5" />
           </div>
           <div className="flex items-center space-x-2">
-            <h2 className="text-xs font-mono font-semibold tracking-wider text-neutral-900 dark:text-white uppercase">
-              AG Studio 3.0 Workspace
+            <h2>
+              Analytics studio
             </h2>
             <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800">
-              In-Browser Engine
+              AG Studio
             </span>
           </div>
         </div>
 
         {/* Studio Controls */}
         <div className="flex items-center space-x-2 font-mono text-xs">
-          <div className="flex bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-0.5">
+          <div className="segmented-control">
             <button
               onClick={() => setStudioMode('edit')}
+              aria-pressed={studioMode === 'edit'}
               className={`px-2.5 py-0.5 rounded text-[11px] transition-all flex items-center space-x-1 ${
                 studioMode === 'edit'
                   ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium shadow-sm'
@@ -118,6 +138,7 @@ export const StudioWorkspace: React.FC = () => {
             </button>
             <button
               onClick={() => setStudioMode('view')}
+              aria-pressed={studioMode === 'view'}
               className={`px-2.5 py-0.5 rounded text-[11px] transition-all flex items-center space-x-1 ${
                 studioMode === 'view'
                   ? 'bg-white dark:bg-neutral-800 text-neutral-900 dark:text-white font-medium shadow-sm'
@@ -131,6 +152,7 @@ export const StudioWorkspace: React.FC = () => {
 
           <button
             onClick={() => refreshState()}
+            aria-label="Refresh analytics data"
             className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors"
             title="Refresh In-Browser Data Engine"
           >
@@ -140,12 +162,12 @@ export const StudioWorkspace: React.FC = () => {
       </div>
 
       {/* Embedded AG Studio Canvas */}
-      <div className="flex-1 w-full h-full relative" style={{ minHeight: '620px' }}>
+      <div className="studio-canvas-scroll flex-1 w-full h-full relative" style={{ minHeight: '620px', overflowX: 'auto' }}>
         <AgStudio
           data={studioData as any}
           widgets={cascadeCustomWidgets as any}
           mode={studioMode}
-          theme={studioTheme}
+          theme={workspaceTheme}
           className="w-full h-full"
           style={{ width: '100%', height: '100%' }}
         />

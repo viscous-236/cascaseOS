@@ -12,6 +12,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCascadeState } from '@/context/CascadeStateContext';
+import { useDialog } from './ui/useDialog';
 import {
   Bot,
   User,
@@ -39,25 +40,27 @@ interface ChatMessage {
 
 const QUICK_PROMPTS = [
   'Assess schedule delay & idle labor exposure',
-  'Find Channel3 supplier savings for Phase 4',
-  'Explain why Scenario B blocked incumbent',
-  'What is liquidated damages exposure if Phase 2 slips?',
+  'Compare supplier quotes for this project',
+  'Explain the current policy decisions',
+  'Which unfinished phases depend on blocked work?',
 ];
 
 export const AgentChatModal: React.FC = () => {
-  const { isAgentChatOpen, setIsAgentChatOpen, refreshState } = useCascadeState();
+  const { isAgentChatOpen, setIsAgentChatOpen, refreshState, activeProjectId, health } = useCascadeState();
+  const dialogRef = useDialog(isAgentChatOpen, () => setIsAgentChatOpen(false));
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       role: 'assistant',
       content:
-        "Welcome to **CascadeOS FinOps Copilot** (Groq gpt-oss-120b). I monitor schedule critical paths, invoice dependencies, and supplier price creep.\n\nAsk me any question or choose a prompt below to run live blast radius calculations.",
+        'Ask about schedule dependencies, invoice delays, or supplier quotes for this project. Requests to run tools can update project state.',
       timestamp: new Date().toLocaleTimeString(),
     },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setMessages((previous) => previous.filter((message) => message.id === 'welcome')); setInputValue(''); }, [activeProjectId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -94,6 +97,7 @@ export const AgentChatModal: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          projectId: activeProjectId,
           conversationHistory: history,
         }),
       });
@@ -143,16 +147,21 @@ export const AgentChatModal: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={() => setIsAgentChatOpen(false)}
-          className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 dialog-backdrop"
         />
 
         {/* Modal Window */}
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="FinOps assistant"
+          tabIndex={-1}
           initial={{ scale: 0.95, opacity: 0, y: 15 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 15 }}
           transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className="relative w-full max-w-2xl bg-white dark:bg-[#0c0e14] text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[620px] z-10 transition-colors duration-200"
+          className="dialog-panel chat-panel relative w-full max-w-2xl overflow-hidden flex flex-col z-10"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-3.5 border-b border-neutral-200 dark:border-white/[0.08] bg-neutral-50 dark:bg-[#090b10]">
@@ -164,13 +173,14 @@ export const AgentChatModal: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">FinOps Copilot</h3>
                   <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800">
-                    Groq OSS 120B
+                    {health?.llmModel ?? 'Project assistant'}
                   </span>
                 </div>
               </div>
             </div>
 
             <button
+              aria-label="Close FinOps assistant"
               onClick={() => setIsAgentChatOpen(false)}
               className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 transition-colors"
             >
@@ -179,7 +189,7 @@ export const AgentChatModal: React.FC = () => {
           </div>
 
           {/* Messages Body */}
-          <div className="flex-1 p-5 overflow-y-auto space-y-3.5">
+          <div className="flex-1 p-5 overflow-y-auto space-y-3.5" role="log" aria-live="polite" aria-label="Conversation">
             {messages.map((msg) => {
               const isAssistant = msg.role === 'assistant';
               return (
@@ -268,7 +278,7 @@ export const AgentChatModal: React.FC = () => {
           </div>
 
           {/* Input Form */}
-          <div className="p-3 bg-neutral-50 dark:bg-[#090b10] border-t border-neutral-200 dark:border-white/[0.08]">
+          <div className="chat-composer p-3 bg-neutral-50 dark:bg-[#090b10] border-t border-neutral-200 dark:border-white/[0.08]">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -277,6 +287,7 @@ export const AgentChatModal: React.FC = () => {
               className="flex items-center space-x-2"
             >
               <input
+                aria-label="Message to FinOps assistant"
                 type="text"
                 placeholder="Ask about idle hours, Channel3 savings, or schedule reroutes..."
                 value={inputValue}

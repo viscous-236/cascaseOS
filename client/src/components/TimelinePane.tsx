@@ -10,6 +10,7 @@
  */
 
 import React, { useRef, useMemo, useState, useEffect } from 'react';
+import '@/utils/bryntumPatch';
 import { BryntumGantt } from '@bryntum/gantt-react';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import { formatMinorToUSD } from '@/utils/formatters';
@@ -29,6 +30,9 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import type { CascadeTask, ScheduleStatus, PayPalInvoiceStatus } from '@/types/domain';
+import { phaseName, shortDate, Status } from './workspace/Status';
+
+const escapeHtml = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]!));
 
 export const TimelinePane: React.FC = () => {
   const {
@@ -44,6 +48,11 @@ export const TimelinePane: React.FC = () => {
 
   const [criticalPathEnabled, setCriticalPathEnabled] = useState(true);
   const [viewPreset, setViewPreset] = useState<'weekAndDay' | 'monthAndYear' | 'dayAndWeek'>('weekAndDay');
+  const [showAddPhase, setShowAddPhase] = useState(false);
+  const [phaseTitle, setPhaseTitle] = useState('');
+  const [phaseCrew, setPhaseCrew] = useState('');
+  const [phaseDuration, setPhaseDuration] = useState(3);
+  const [phaseStart, setPhaseStart] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Transform domain tasks into Bryntum TaskModel data
   const projectData = useMemo(() => {
@@ -54,8 +63,6 @@ export const TimelinePane: React.FC = () => {
     const tasks = state.tasks.map((task: CascadeTask) => {
       let percentDone = 0;
       if (task.schedule_status === 'COMPLETED') percentDone = 100;
-      else if (task.schedule_status === 'REROUTED_ACTIVE') percentDone = 40;
-      else if (task.schedule_status === 'READY_TO_PROMOTE') percentDone = 20;
 
       const statusClass = `status-${task.schedule_status.toLowerCase().replace(/_/g, '-')}`;
       const isSelected = selectedTaskId === task.task_id ? 'b-selected-milestone' : '';
@@ -136,7 +143,7 @@ export const TimelinePane: React.FC = () => {
         const isSelected = selectedTaskId === record.id;
         return `
           <div class="flex items-center space-x-2 py-0.5 ${isSelected ? 'font-bold text-emerald-500' : ''}">
-            <span class="truncate">${record.name}</span>
+            <span class="gantt-phase-name">${escapeHtml(phaseName(record.name))}</span>
           </div>
         `;
       },
@@ -144,17 +151,19 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Crew',
       field: 'crewAssigned',
+      hidden: true,
       width: 150,
       renderer: ({ record }: any) => `
         <div class="flex items-center space-x-1.5 text-xs font-mono opacity-80">
           <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
-          <span class="truncate">${record.crewAssigned || 'Unassigned'}</span>
+          <span class="truncate">${escapeHtml(record.crewAssigned || 'Unassigned')}</span>
         </div>
       `,
     },
     {
       text: 'Status',
       field: 'scheduleStatus',
+      hidden: true,
       width: 150,
       renderer: ({ record }: any) => {
         const st: ScheduleStatus = record.scheduleStatus;
@@ -190,6 +199,7 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'PayPal Invoice',
       field: 'invoiceStatus',
+      hidden: true,
       width: 140,
       renderer: ({ record }: any) => {
         const inv: PayPalInvoiceStatus = record.invoiceStatus;
@@ -221,6 +231,8 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Unlock Amount',
       field: 'materialsUnlockMinor',
+      hidden: true,
+      align: 'right',
       width: 120,
       renderer: ({ record }: any) => {
         const amt = formatMinorToUSD(record.materialsUnlockMinor);
@@ -230,6 +242,8 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Idle Burn',
       field: 'dailyIdleBurnMinor',
+      hidden: true,
+      align: 'right',
       width: 100,
       renderer: ({ record }: any) => {
         const amt = formatMinorToUSD(record.dailyIdleBurnMinor);
@@ -240,6 +254,7 @@ export const TimelinePane: React.FC = () => {
       type: 'date',
       text: 'Start',
       field: 'startDate',
+      hidden: true,
       width: 95,
       format: 'YYYY-MM-DD',
     },
@@ -247,6 +262,7 @@ export const TimelinePane: React.FC = () => {
       type: 'date',
       text: 'End',
       field: 'endDate',
+      hidden: true,
       width: 95,
       format: 'YYYY-MM-DD',
     },
@@ -254,41 +270,15 @@ export const TimelinePane: React.FC = () => {
 
   const ganttConfig = useMemo(() => ({
     viewPreset,
-    rowHeight: 46,
-    barMargin: 8,
+    rowHeight: 58,
+    barMargin: 17,
     criticalPathsFeature: {
       disabled: !criticalPathEnabled,
     },
     taskRenderer: ({ taskRecord }: any) => {
-      const invoiceStatus = taskRecord.invoiceStatus;
-      const scheduleStatus = taskRecord.scheduleStatus;
-
-      let badgeText = scheduleStatus?.replace(/_/g, ' ') || 'SCHEDULED';
-      let badgeCls = 'bg-neutral-800 text-neutral-200 border-neutral-700';
-
-      if (invoiceStatus === 'PAID') {
-        badgeText = 'PAID';
-        badgeCls = 'bg-emerald-600/90 text-white border-emerald-400/40 shadow-sm';
-      } else if (invoiceStatus === 'OVERDUE' || scheduleStatus === 'PAYMENT_BLOCKED') {
-        badgeText = 'OVERDUE — BLOCKING ($2,800 RISK)';
-        badgeCls = 'bg-rose-600 text-white font-bold border-rose-400/40 animate-pulse shadow-sm';
-      } else if (scheduleStatus === 'REROUTED_ACTIVE') {
-        badgeText = 'REROUTED — ACTIVE';
-        badgeCls = 'bg-sky-600/90 text-white font-semibold border-sky-400/40 shadow-sm';
-      } else if (scheduleStatus === 'MATERIALS_ORDERED') {
-        badgeText = 'MATERIALS ORDERED';
-        badgeCls = 'bg-purple-600/90 text-white font-semibold border-purple-400/40 shadow-sm';
-      } else if (scheduleStatus === 'READY_TO_PROMOTE') {
-        badgeText = 'READY TO PROMOTE';
-        badgeCls = 'bg-amber-600/90 text-white font-semibold border-amber-400/40 shadow-sm';
-      }
-
       return `
         <div class="b-gantt-task-content flex items-center justify-between w-full h-full px-2.5 overflow-hidden text-xs">
-          <span class="truncate font-medium text-white drop-shadow-sm">${taskRecord.name}</span>
-          <span class="ml-2 px-2 py-0.5 rounded text-[10px] font-mono tracking-wider uppercase border whitespace-nowrap ${badgeCls}">
-            ${badgeText}
-          </span>
+          <span class="truncate">${escapeHtml(phaseName(taskRecord.name))}</span>
         </div>
       `;
     },
@@ -298,9 +288,9 @@ export const TimelinePane: React.FC = () => {
         const burn = formatMinorToUSD(taskRecord.dailyIdleBurnMinor || 0);
         const penalty = formatMinorToUSD(taskRecord.slaPenaltyMinor || 0);
         return `
-          <div class="p-2 space-y-1 text-xs font-mono">
-            <div class="font-bold border-b pb-1">${taskRecord.name}</div>
-            <div class="flex justify-between"><span>Status:</span><span>${taskRecord.scheduleStatus}</span></div>
+          <div class="gantt-tooltip">
+            <strong>${escapeHtml(taskRecord.name)}</strong>
+            <div><span>Status:</span><span>${escapeHtml(taskRecord.scheduleStatus)}</span></div>
             <div class="flex justify-between"><span>Materials Unlock:</span><span class="text-emerald-500 font-bold">${unlock}</span></div>
             <div class="flex justify-between"><span>Daily Burn:</span><span class="text-rose-500">${burn}/d</span></div>
             <div class="flex justify-between"><span>SLA Penalty:</span><span>${penalty}</span></div>
@@ -334,38 +324,25 @@ export const TimelinePane: React.FC = () => {
   }, [selectedTaskId, state?.tasks]);
 
   const handleQuickAddPhase = async () => {
-    const currentCount = state?.tasks?.length || 0;
-    const newPhaseNum = currentCount + 1;
-    const newId = `phase_${newPhaseNum}_custom`;
-
-    let startDate = new Date().toISOString().slice(0, 10);
-    if (state?.tasks && state.tasks.length > 0) {
-      const sorted = [...state.tasks].sort((a, b) => a.end_date.localeCompare(b.end_date));
-      const lastTask = sorted[sorted.length - 1];
-      if (lastTask && lastTask.end_date) {
-        const d = new Date(lastTask.end_date);
-        d.setDate(d.getDate() + 1);
-        startDate = d.toISOString().slice(0, 10);
-      }
-    }
-
-    await addNewTaskPhase({
-      task_id: newId,
-      name: `Phase ${newPhaseNum}: Operational Commissioning`,
-      duration_days: 3,
-      start_date: startDate,
-      crew_assigned: 'Integration & Testing Crew',
-      daily_idle_burn_minor: 65000,
+    if (!phaseTitle.trim() || isRefreshing) return;
+    const created = await addNewTaskPhase({
+      task_id: `phase_${crypto.randomUUID()}`,
+      name: phaseTitle.trim(),
+      duration_days: phaseDuration,
+      start_date: phaseStart,
+      crew_assigned: phaseCrew.trim() || 'Unassigned',
+      daily_idle_burn_minor: 0,
       sla_delay_penalty_minor: 0,
-      phase_hardware_budget_max_minor: 100000,
+      phase_hardware_budget_max_minor: 0,
       schedule_status: 'SCHEDULED',
-      invoice_total_minor: 320000,
-      materials_unlock_minor: 96000,
-      deferred_labor_minor: 224000,
-      materials_in_warehouse: true,
-      create_live_paypal_invoice: true,
+      invoice_total_minor: 0,
+      materials_unlock_minor: 0,
+      deferred_labor_minor: 0,
+      materials_in_warehouse: false,
+      create_live_paypal_invoice: false,
       run_live_channel3_audit: false,
     });
+    if (created) { setShowAddPhase(false); setPhaseTitle(''); }
   };
 
   const handleTaskDblClick = ({ taskRecord }: any) => {
@@ -408,16 +385,16 @@ export const TimelinePane: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-[#0c0e14] border border-neutral-200 dark:border-white/[0.08] rounded-2xl overflow-hidden shadow-sm transition-colors duration-200">
+    <div className="timeline-pane">
       {/* Decongested Header Toolbar */}
-      <div className="flex flex-wrap items-center justify-between px-5 py-2.5 bg-neutral-50 dark:bg-[#090b10] border-b border-neutral-200 dark:border-white/[0.08]">
+      <div className="timeline-toolbar">
         <div className="flex items-center space-x-2.5">
           <div className="w-6 h-6 rounded-md bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 flex items-center justify-center text-neutral-600 dark:text-neutral-300">
             <Layers className="w-3.5 h-3.5" />
           </div>
           <div className="flex items-center space-x-2">
-            <h2 className="text-xs font-mono font-semibold tracking-wider text-neutral-900 dark:text-white uppercase">
-              Schedule Timeline
+            <h2>
+              Project schedule
             </h2>
             {isRefreshing && (
               <span className="flex h-1.5 w-1.5 relative">
@@ -429,12 +406,13 @@ export const TimelinePane: React.FC = () => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center space-x-2 font-mono text-xs">
+        <div className="timeline-actions">
           {/* + Add Phase Button */}
           <button
-            onClick={handleQuickAddPhase}
+            onClick={() => setShowAddPhase((value) => !value)}
+            aria-expanded={showAddPhase}
             disabled={isRefreshing}
-            className="px-2.5 py-1 text-xs font-mono rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-950 font-medium hover:opacity-90 flex items-center space-x-1.5 transition-all shadow-sm disabled:opacity-50"
+            className="button button-primary"
             title="Add a new milestone phase to this project"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -444,7 +422,8 @@ export const TimelinePane: React.FC = () => {
           {/* Critical Path Toggle */}
           <button
             onClick={() => setCriticalPathEnabled((v) => !v)}
-            className={`px-2.5 py-1 text-xs font-mono rounded-lg border transition-all flex items-center space-x-1.5 ${
+            aria-pressed={criticalPathEnabled}
+            className={`chart-only px-2.5 py-1 text-xs font-mono rounded-lg border transition-all flex items-center space-x-1.5 ${
               criticalPathEnabled
                 ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800/60'
                 : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:text-neutral-900 dark:hover:text-white'
@@ -456,7 +435,7 @@ export const TimelinePane: React.FC = () => {
           </button>
 
           {/* Preset Buttons */}
-          <div className="flex bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-0.5 text-xs">
+          <div className="chart-only flex bg-neutral-100 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-0.5 text-xs">
             <button
               onClick={() => setViewPreset('dayAndWeek')}
               className={`px-2 py-0.5 rounded text-[11px] font-mono transition-colors ${
@@ -492,7 +471,8 @@ export const TimelinePane: React.FC = () => {
           {/* Zoom to fit */}
           <button
             onClick={handleZoomToFit}
-            className="p-1 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800 hover:text-neutral-800 dark:hover:text-white transition-all"
+            aria-label="Zoom to fit schedule"
+            className="chart-only p-1 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800 hover:text-neutral-800 dark:hover:text-white transition-all"
             title="Zoom to Fit Schedule"
           >
             <Maximize2 className="w-3.5 h-3.5" />
@@ -512,9 +492,11 @@ export const TimelinePane: React.FC = () => {
         </div>
       </div>
 
+      {showAddPhase && <form className="phase-composer" onSubmit={(event) => { event.preventDefault(); void handleQuickAddPhase(); }}><label>Phase name<input required value={phaseTitle} onChange={(event) => setPhaseTitle(event.target.value)} /></label><label>Crew<input value={phaseCrew} onChange={(event) => setPhaseCrew(event.target.value)} /></label><label>Start date<input required type="date" value={phaseStart} onChange={(event) => setPhaseStart(event.target.value)} /></label><label>Days<input type="number" required min={1} max={365} value={phaseDuration} onChange={(event) => setPhaseDuration(Number(event.target.value))} /></label><button className="button button-primary" type="submit" disabled={isRefreshing}>Create phase</button><p>Creates a schedule-only phase with no invoice or supplier order.</p></form>}
+
       {/* Cross-Filtering Active Minimal Banner */}
       {activeTask && (
-        <div className="bg-emerald-50/80 dark:bg-slate-900/90 border-b border-emerald-200 dark:border-emerald-500/30 px-5 py-1.5 flex items-center justify-between text-xs">
+        <div className="timeline-selection">
           <div className="flex items-center space-x-2 font-mono">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             <span className="font-semibold text-neutral-900 dark:text-slate-100">{activeTask.name}</span>
@@ -536,7 +518,7 @@ export const TimelinePane: React.FC = () => {
       )}
 
       {/* Bryntum Gantt View Container */}
-      <div className="flex-1 min-h-[460px] w-full relative">
+      <div className="gantt-container">
         <BryntumGantt
           ref={ganttRef}
           tasks={projectData.tasks}
@@ -551,6 +533,7 @@ export const TimelinePane: React.FC = () => {
           cls="w-full h-full"
         />
       </div>
+      <div className="timeline-mobile-list">{state?.tasks.map((task) => <button key={task.task_id} onClick={() => openTaskDrawer(task.task_id)}><strong>{phaseName(task.name)}</strong><span className="cell-note">{shortDate(task.start_date)}–{shortDate(task.end_date)} · {task.duration_days} days · {task.crew_assigned}</span><Status value={task.schedule_status} /></button>)}</div>
     </div>
   );
 };

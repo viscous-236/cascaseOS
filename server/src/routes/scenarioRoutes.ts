@@ -13,7 +13,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { getDb, TaskRepo, QuoteRepo, withTransaction } from '../db/database.js';
+import { getDb, ProjectRepo, TaskRepo, QuoteRepo, withTransaction } from '../db/database.js';
 import { analyzeProjectBlastRadius } from '../engine/criticalPathEngine.js';
 import { computeReroutedSchedule } from '../engine/scheduleRerouter.js';
 import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
@@ -24,7 +24,6 @@ import {
   generateFinOpsPolicyExplanation,
 } from '../services/nudgeAndFinOpsAiService.js';
 import { triggerScenarioSchema } from '../schemas/apiSchemas.js';
-import { APEX_PROJECT_ID, bootstrapApexClinicProject } from '../services/projectBootstrapService.js';
 import type {
   TaskDependency,
   SupplierQuote,
@@ -51,20 +50,17 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
 
   const { scenarioId } = validation.data.params;
   const { forceRefresh, projectId: reqProjectId, targetTaskId } = validation.data.body;
-  const projectId = reqProjectId || APEX_PROJECT_ID;
+  const projectId = reqProjectId ?? ProjectRepo.findAll()[0]?.project_id;
+  if (!projectId) {
+    res.status(400).json({ error: 'projectId is required when no project exists' });
+    return;
+  }
   const db = getDb();
 
   let tasks = TaskRepo.findByProject(projectId);
   if (tasks.length === 0) {
-    if (projectId === APEX_PROJECT_ID) {
-      await bootstrapApexClinicProject();
-      tasks = TaskRepo.findByProject(projectId);
-    } else {
-      res.status(404).json({
-        error: `Project '${projectId}' has no tasks.`,
-      });
-      return;
-    }
+    res.status(404).json({ error: `Project '${projectId}' has no tasks.` });
+    return;
   }
 
   const dependencies = db
@@ -85,10 +81,10 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
       case 'SCENARIO_A': {
         let blockedTask = targetTaskId ? tasks.find((t) => t.task_id === targetTaskId) : null;
         if (!blockedTask) {
-          blockedTask = tasks.find((t) => t.task_id === 'task_phase_2_displays')
-            || tasks.find((t) => t.paypal_invoice_status === 'OVERDUE')
+          blockedTask = tasks.find((t) => t.paypal_invoice_status === 'OVERDUE')
             || tasks.find((t) => t.schedule_status === 'PAYMENT_BLOCKED')
-            || (tasks.length > 1 ? tasks[1] : tasks[0]);
+            || tasks.find((t) => t.paypal_invoice_id && t.materials_in_warehouse === 0)
+            || tasks.find((t) => t.schedule_status !== 'COMPLETED');
         }
 
         if (!blockedTask) {
@@ -132,34 +128,20 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           },
           completedTaskIds,
           phaseCurrency: 'USD',
-          phaseBudgetMaxMinor: candidateTask.phase_hardware_budget_max_minor || 160000,
-          historicalUnitPriceMinor: candidateTask.historical_unit_price_minor || 38000,
-          maxAllowedVariancePct: candidateTask.max_allowed_variance_pct || 10.0,
+          phaseBudgetMaxMinor: candidateTask.phase_hardware_budget_max_minor,
+          historicalUnitPriceMinor: candidateTask.historical_unit_price_minor ?? 0,
+          maxAllowedVariancePct: candidateTask.max_allowed_variance_pct,
           proposedQuote: {
             currency: 'USD',
-            unitPriceMinor: candidateTask.historical_unit_price_minor
-              ? Math.floor(candidateTask.historical_unit_price_minor * 0.92)
-              : 34900,
-            quantity: candidateTask.required_quantity > 0 ? candidateTask.required_quantity : 4,
+            unitPriceMinor: candidateTask.historical_unit_price_minor ?? 0,
+            quantity: candidateTask.required_quantity > 0 ? candidateTask.required_quantity : 1,
             shippingMinor: 0,
             taxMinor: 0,
           },
           hasExplicitUserApproval: false, // Before human sign-off -> REQUIRE_APPROVAL
         });
 
-        // 4. Compute Canonical SHA-256 State Fingerprint (PAT-002)
-        const stateFingerprint = computeStateFingerprint({
-          projectId: projectId,
-          blockedTaskId: blockedTask.task_id,
-          promotedTaskId: candidateTask.task_id,
-          invoiceId: blockedTask.paypal_invoice_id || `INV2-${blockedTask.task_id}`,
-          unlockAmountMinor: blockedTask.materials_unlock_minor,
-          channel3ProductId: `quote_${blockedTask.task_id}`,
-          supplierTotalMinor: blockedTask.materials_unlock_minor,
-          currency: 'USD',
-        });
-
-        // 5. Generate AI Nudge-Bot Message & Policy Explanation
+        // 4. Generate AI Nudge-Bot Message & Policy Explanation
         const nudge = await generateClientNudgeMessage({
           clientName: blockedTask.client_name,
           clientEmail: blockedTask.client_email,
@@ -186,34 +168,30 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
         const existingQuotes = QuoteRepo.findByTask(blockedTask.task_id);
         let quoteId = existingQuotes[0]?.quote_id;
         if (!quoteId) {
-          const anyQuote = QuoteRepo.findByProject(projectId)[0];
-          quoteId = anyQuote?.quote_id;
-        }
-        if (!quoteId) {
-          quoteId = `quote_${blockedTask.task_id}_baseline`;
-          QuoteRepo.insert({
-            quote_id: quoteId,
-            task_id: blockedTask.task_id,
-            source_type: 'INCUMBENT_INVOICE',
-            external_product_id: `ext_${blockedTask.task_id}`,
-            product_title: `${blockedTask.name} Hardware Baseline`,
-            merchant_name: blockedTask.incumbent_vendor_name || 'Standard Vendor',
-            product_url: null,
-            image_url: null,
-            currency: 'USD',
-            unit_price_minor: blockedTask.incumbent_unit_price_minor || 38000,
-            quantity: blockedTask.required_quantity || 1,
-            shipping_minor: 0,
-            tax_minor: 0,
-            total_minor: (blockedTask.incumbent_unit_price_minor || 38000) * (blockedTask.required_quantity || 1),
-            variance_vs_historical_pct: 0,
-            savings_vs_incumbent_minor: 0,
-            availability_status: 'IN_STOCK',
-            observed_at: new Date().toISOString(),
+          res.status(422).json({
+            error: 'No supplier quote exists for selected blocked task',
           });
+          return;
         }
 
-        // 6. Persist Recovery Plan in SQLite (PAT-001)
+        const selectedQuote = QuoteRepo.findById(quoteId);
+        if (!selectedQuote) {
+          res.status(500).json({ error: 'Recovery quote could not be resolved' });
+          return;
+        }
+
+        const stateFingerprint = computeStateFingerprint({
+          projectId,
+          blockedTaskId: blockedTask.task_id,
+          promotedTaskId: candidateTask.task_id,
+          invoiceId: blockedTask.paypal_invoice_id ?? `${projectId}:${blockedTask.task_id}`,
+          unlockAmountMinor: blockedTask.materials_unlock_minor,
+          channel3ProductId: selectedQuote.external_product_id,
+          supplierTotalMinor: selectedQuote.total_minor,
+          currency: 'USD',
+        });
+
+        // 5. Persist Recovery Plan in SQLite (PAT-001)
         const planId = `plan_reroute_${Date.now()}`;
         const plan: CascadeRecoveryPlan = {
           plan_id: planId,
@@ -306,9 +284,9 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
       case 'SCENARIO_B': {
         let hardwareTask = targetTaskId ? tasks.find((t) => t.task_id === targetTaskId) : null;
         if (!hardwareTask) {
-          hardwareTask = tasks.find((t) => t.task_id === 'task_phase_2_displays')
-            || tasks.find((t) => Boolean(t.sku_search_query) && t.required_quantity > 0)
-            || (tasks.length > 1 ? tasks[1] : tasks[0]);
+          hardwareTask = tasks.find(
+            (t) => Boolean(t.sku_search_query) && t.required_quantity > 0
+          );
         }
 
         if (!hardwareTask) {
@@ -320,9 +298,13 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           .filter((d) => d.to_task_id === hardwareTask.task_id)
           .map((d) => d.from_task_id);
 
-        const incumbentUnitPrice = hardwareTask.incumbent_unit_price_minor || 49000;
-        const historicalUnitPrice = hardwareTask.historical_unit_price_minor || 38000;
-        const requiredQty = hardwareTask.required_quantity || 4;
+        if (hardwareTask.incumbent_unit_price_minor === null || hardwareTask.historical_unit_price_minor === null || hardwareTask.required_quantity < 1) {
+          res.status(422).json({ error: 'Hardware task lacks incumbent price, historical baseline, or quantity' });
+          return;
+        }
+        const incumbentUnitPrice = hardwareTask.incumbent_unit_price_minor;
+        const historicalUnitPrice = hardwareTask.historical_unit_price_minor;
+        const requiredQty = hardwareTask.required_quantity;
 
         // 1. Evaluate Incumbent Quote (+28.95% creep) -> BLOCK
         const incumbentEval = evaluateRecoveryAndSupplierAction({
@@ -333,9 +315,9 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           },
           completedTaskIds,
           phaseCurrency: 'USD',
-          phaseBudgetMaxMinor: hardwareTask.phase_hardware_budget_max_minor || 160000,
+          phaseBudgetMaxMinor: hardwareTask.phase_hardware_budget_max_minor,
           historicalUnitPriceMinor: historicalUnitPrice,
-          maxAllowedVariancePct: hardwareTask.max_allowed_variance_pct || 10.0,
+          maxAllowedVariancePct: hardwareTask.max_allowed_variance_pct,
           proposedQuote: {
             currency: 'USD',
             unitPriceMinor: incumbentUnitPrice,
@@ -369,8 +351,12 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           channel3Quotes = await searchAndAuditSupplierProducts(hardwareTask, {
             forceRefresh: Boolean(forceRefresh),
           });
-        } catch {
-          // Fallback if network issue
+        } catch (err) {
+          res.status(502).json({
+            error: 'Channel3 live supplier audit failed',
+            message: String(err),
+          });
+          return;
         }
 
         const maxCompliantPrice = Math.round(historicalUnitPrice * 1.1);
@@ -387,32 +373,11 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
         }
 
         if (!bestQuote) {
-          // Synthesize benchmark Channel3 quote if fresh project
-          const quoteId = `quote_ch3_${Date.now()}`;
-          const unitPrice = 34900;
-          const totalMinor = unitPrice * requiredQty;
-          const savingsMinor = (incumbentUnitPrice * requiredQty) - totalMinor;
-          bestQuote = {
-            quote_id: quoteId,
-            task_id: hardwareTask.task_id,
-            source_type: 'CHANNEL3_LIVE',
-            external_product_id: 'ch3_prod_live_4k',
-            product_title: '32 inch 4K UHD IPS Monitor Ergonomic Stand',
-            merchant_name: 'B&H Photo Video',
-            product_url: 'https://www.bhphotovideo.com/c/product/ch3-display',
-            image_url: null,
-            currency: 'USD',
-            unit_price_minor: unitPrice,
-            quantity: requiredQty,
-            shipping_minor: 0,
-            tax_minor: 0,
-            total_minor: totalMinor,
-            variance_vs_historical_pct: -8.16,
-            savings_vs_incumbent_minor: savingsMinor,
-            availability_status: 'IN_STOCK',
-            observed_at: new Date().toISOString(),
-          };
-          QuoteRepo.insert(bestQuote);
+          res.status(422).json({
+            error: 'No compliant Channel3 quote found',
+            max_unit_price_minor: maxCompliantPrice,
+          });
+          return;
         }
 
         const safeQuote = bestQuote;
@@ -426,9 +391,9 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           },
           completedTaskIds,
           phaseCurrency: 'USD',
-          phaseBudgetMaxMinor: hardwareTask.phase_hardware_budget_max_minor || 160000,
+          phaseBudgetMaxMinor: hardwareTask.phase_hardware_budget_max_minor,
           historicalUnitPriceMinor: historicalUnitPrice,
-          maxAllowedVariancePct: hardwareTask.max_allowed_variance_pct || 10.0,
+          maxAllowedVariancePct: hardwareTask.max_allowed_variance_pct,
           proposedQuote: {
             currency: safeQuote.currency,
             unitPriceMinor: safeQuote.unit_price_minor,
@@ -444,7 +409,7 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           projectId: projectId,
           blockedTaskId: hardwareTask.task_id,
           promotedTaskId: hardwareTask.task_id,
-          invoiceId: hardwareTask.paypal_invoice_id || `INV2-${hardwareTask.task_id}`,
+          invoiceId: hardwareTask.paypal_invoice_id ?? `${projectId}:${hardwareTask.task_id}`,
           unlockAmountMinor: safeQuote.total_minor,
           channel3ProductId: safeQuote.external_product_id,
           supplierTotalMinor: safeQuote.total_minor,
@@ -547,9 +512,10 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
       case 'SCENARIO_C': {
         let downstreamTask = targetTaskId ? tasks.find((t) => t.task_id === targetTaskId) : null;
         if (!downstreamTask) {
-          downstreamTask = tasks.find((t) => t.task_id === 'task_phase_4_calibration')
-            || tasks.find((t) => dependencies.some((d) => d.to_task_id === t.task_id))
-            || tasks[tasks.length - 1];
+          downstreamTask = tasks.find(
+            (t) => dependencies.some((d) => d.to_task_id === t.task_id)
+              && t.schedule_status !== 'COMPLETED'
+          );
         }
 
         if (!downstreamTask) {
@@ -563,7 +529,8 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           .map((d) => d.from_task_id);
 
         if (requiredPrereqs.length === 0) {
-          requiredPrereqs = ['task_phase_uncompleted_prereq'];
+          res.status(400).json({ error: 'Selected task has no hard dependency to test' });
+          return;
         }
 
         // Evaluate adversarial proposal:
@@ -596,9 +563,9 @@ router.post('/scenarios/:scenarioId/trigger', async (req: Request, res: Response
           projectId: projectId,
           blockedTaskId: downstreamTask.task_id,
           promotedTaskId: downstreamTask.task_id,
-          invoiceId: 'INV2-ADVERSARIAL',
+          invoiceId: `${projectId}:${downstreamTask.task_id}:adversarial`,
           unlockAmountMinor: 210000,
-          channel3ProductId: 'quote_adversarial_overspend',
+          channel3ProductId: `adversarial:${downstreamTask.task_id}`,
           supplierTotalMinor: 210000,
           currency: 'USD',
         });

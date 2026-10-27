@@ -33,6 +33,7 @@ import {
 import { useCascadeState } from '@/context/CascadeStateContext';
 import { formatMinorToUSD } from '@/utils/formatters';
 import type { CascadeTask, SupplierQuote } from '@/types/domain';
+import { useDialog } from './ui/useDialog';
 
 export const TaskFinancialsDrawer: React.FC = () => {
   const {
@@ -54,6 +55,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
   const [endDate, setEndDate] = useState(task?.end_date || '');
   const [isUpdating, setIsUpdating] = useState(false);
   const [isProvisioning, setIsProvisioning] = useState(false);
+  const dialogRef = useDialog(isTaskFinancialsDrawerOpen && !!task, closeTaskDrawer);
 
   useEffect(() => {
     if (task) {
@@ -113,17 +115,22 @@ export const TaskFinancialsDrawer: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={closeTaskDrawer}
-          className="absolute inset-0 bg-neutral-950/50 backdrop-blur-sm"
+          className="absolute inset-0 dialog-backdrop"
         />
 
         {/* Slide-over Drawer Panel */}
-        <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="drawer-container fixed inset-y-0 right-0 max-w-full flex pl-10">
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="task-dialog-title"
+            tabIndex={-1}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-            className="w-screen max-w-xl bg-white dark:bg-[#0c0e14] border-l border-neutral-200 dark:border-white/[0.1] shadow-2xl flex flex-col transition-colors duration-200"
+            className="dialog-panel drawer-panel w-screen max-w-xl border-l flex flex-col"
           >
             {/* Header */}
             <div className="px-6 py-4 border-b border-neutral-200 dark:border-white/[0.08] bg-neutral-50/80 dark:bg-neutral-900/40 flex items-center justify-between">
@@ -133,7 +140,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-neutral-900 dark:text-white truncate max-w-xs">
+                    <h3 id="task-dialog-title" className="text-sm font-semibold text-neutral-900 dark:text-white truncate max-w-xs">
                       {task.name}
                     </h3>
                     <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300">
@@ -147,6 +154,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
               </div>
 
               <button
+                aria-label="Close phase financials"
                 onClick={closeTaskDrawer}
                 className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
               >
@@ -174,6 +182,8 @@ export const TaskFinancialsDrawer: React.FC = () => {
                         Start Date
                       </label>
                       <input
+                        aria-label="Start date"
+                        required
                         type="date"
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
@@ -185,6 +195,9 @@ export const TaskFinancialsDrawer: React.FC = () => {
                         End Date
                       </label>
                       <input
+                        aria-label="End date"
+                        required
+                        min={startDate}
                         type="date"
                         value={endDate}
                         onChange={(e) => setEndDate(e.target.value)}
@@ -196,6 +209,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
                         Duration (d)
                       </label>
                       <input
+                        aria-label="Duration in days"
                         type="number"
                         min={1}
                         value={durationDays}
@@ -210,6 +224,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleToggleWarehouse}
+                      aria-pressed={task.materials_in_warehouse === 1}
                       disabled={isUpdating}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono border transition-all ${
                         task.materials_in_warehouse === 1
@@ -290,6 +305,17 @@ export const TaskFinancialsDrawer: React.FC = () => {
                     <span>Client Billing:</span>
                     <span className="text-neutral-900 dark:text-white">{task.client_email}</span>
                   </div>
+                  {task.paypal_invoice_view_url && (
+                    <a
+                      href={task.paypal_invoice_view_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between text-sky-600 dark:text-sky-400 hover:underline"
+                    >
+                      <span>Buyer Payment Page:</span>
+                      <span className="flex items-center gap-1">Open PayPal <ExternalLink className="w-3 h-3" /></span>
+                    </a>
+                  )}
 
                   <div className="pt-2 border-t border-neutral-200 dark:border-neutral-800 space-y-1">
                     <div className="flex justify-between">

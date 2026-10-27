@@ -19,8 +19,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Geist', 'system-ui', 'sans-serif'],
+        mono: ['Geist', 'system-ui', 'sans-serif'],
       },
       animation: {
         'shimmer-slide': 'shimmer-slide var(--speed) ease-in-out infinite alternate',

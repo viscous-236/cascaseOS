@@ -32,6 +32,7 @@ import {
   Search
 } from 'lucide-react';
 import type { AuditEvent, PayPalTransactionRecord, PolicyDecisionType } from '@/types/domain';
+import { useDialog } from './ui/useDialog';
 
 export const AuditDrawer: React.FC = () => {
   const { isAuditDrawerOpen, setIsAuditDrawerOpen, state } = useCascadeState();
@@ -39,6 +40,7 @@ export const AuditDrawer: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [decisionFilter, setDecisionFilter] = useState<'ALL' | PolicyDecisionType>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const dialogRef = useDialog(isAuditDrawerOpen, () => setIsAuditDrawerOpen(false));
 
   const auditEvents = state?.auditEvents || [];
   const paypalTransactions = state?.paypalTransactions || [];
@@ -64,7 +66,6 @@ export const AuditDrawer: React.FC = () => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     toast.success(`${label} copied to clipboard`);
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   // Export Audit Report (.json or .md)
@@ -147,16 +148,21 @@ export const AuditDrawer: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={() => setIsAuditDrawerOpen(false)}
-          className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+          className="fixed inset-0 dialog-backdrop"
         />
 
-        <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+        <div className="drawer-container fixed inset-y-0 right-0 max-w-full flex pl-10">
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Project audit trail"
+            tabIndex={-1}
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="w-screen max-w-2xl bg-white dark:bg-[#0c0e14] border-l border-neutral-200 dark:border-white/[0.08] text-neutral-900 dark:text-white shadow-2xl flex flex-col transition-colors duration-200"
+            className="dialog-panel drawer-panel audit-panel w-screen max-w-2xl border-l flex flex-col"
           >
             {/* Header */}
             <div className="px-6 py-4 border-b border-neutral-200 dark:border-white/[0.08] bg-neutral-50 dark:bg-[#090b10] flex items-center justify-between">
@@ -178,6 +184,7 @@ export const AuditDrawer: React.FC = () => {
               </div>
 
               <button
+                aria-label="Close audit trail"
                 onClick={() => setIsAuditDrawerOpen(false)}
                 className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 transition-colors"
               >
@@ -232,10 +239,11 @@ export const AuditDrawer: React.FC = () => {
 
             {/* Filter and Search Bar */}
             {activeTab === 'AUDIT_EVENTS' && (
-              <div className="px-6 py-2 bg-neutral-50 dark:bg-neutral-900/30 border-b border-neutral-200 dark:border-white/[0.06] flex items-center justify-between gap-3 text-xs">
+              <div className="audit-filters px-6 py-2 bg-neutral-50 dark:bg-neutral-900/30 border-b border-neutral-200 dark:border-white/[0.06] flex items-center justify-between gap-3 text-xs">
                 <div className="flex-1 relative">
                   <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                   <input
+                    aria-label="Search audit events"
                     type="text"
                     placeholder="Search events, reasons, tasks..."
                     value={searchQuery}
@@ -301,6 +309,7 @@ export const AuditDrawer: React.FC = () => {
                                   {truncateHash(ev.state_fingerprint, 12, 8)}
                                 </span>
                                 <button
+                                  aria-label="Copy state fingerprint"
                                   onClick={() => handleCopy(ev.state_fingerprint!, ev.event_id, 'Fingerprint')}
                                   className="text-neutral-400 hover:text-neutral-900 dark:hover:text-white"
                                 >

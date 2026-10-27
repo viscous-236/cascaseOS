@@ -159,6 +159,7 @@ export interface CascadeTask {
   schedule_status: ScheduleStatus;
   paypal_invoice_id: string | null;
   paypal_invoice_number: string | null;
+  paypal_invoice_view_url: string | null;
   paypal_invoice_status: PayPalInvoiceStatus;
   invoice_total_minor: number;
   materials_unlock_minor: number;

@@ -95,6 +95,10 @@ export interface PayPalInvoice {
     payment_term?: { due_date?: string };
     memo?: string;
     currency_code: string;
+    metadata?: {
+      recipient_view_url?: string;
+      [key: string]: unknown;
+    };
   };
   invoicer?: PayPalInvoicerInfo;
   primary_recipients?: PayPalRecipientInfo[];
@@ -155,6 +159,13 @@ async function paypalRequest<T = unknown>(
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '(unreadable)');
+    if (response.status === 403 && /NOT_AUTHORIZED|insufficient permissions/i.test(errorBody)) {
+      throw new Error(
+        `PayPal Invoicing permission denied for ${method} ${path}. ` +
+        'Enable the Invoicing product for this Sandbox app and use credentials belonging to the Sandbox business merchant account. ' +
+        `PayPal response: ${errorBody}`
+      );
+    }
     throw new Error(
       `PayPalInvoicingService: [${method} ${url}] returned HTTP ${response.status}: ${errorBody}`
     );
@@ -288,11 +299,24 @@ export async function updateInvoiceForPartialMaterialsUnlock(
   currency: string,
   note: string
 ): Promise<PayPalInvoice> {
-  // Build an updated payload preserving required fields
+  // PayPal rejects read-only fields returned by GET when they are sent back in PUT.
+  const {
+    id: _id,
+    status: _status,
+    links: _links,
+    metadata: _metadata,
+    invoice_number: _invoiceNumber,
+    amount: _amount,
+    due_amount: _dueAmount,
+    ...mutableInvoice
+  } = currentInvoice as PayPalInvoice & Record<string, unknown>;
+  const { metadata: _detailMetadata, ...mutableDetail } = currentInvoice.detail;
+
+  // Build an updated payload preserving only mutable invoice fields.
   const updatedPayload = {
-    ...currentInvoice,
+    ...mutableInvoice,
     detail: {
-      ...currentInvoice.detail,
+      ...mutableDetail,
       memo: note,
     },
     configuration: {

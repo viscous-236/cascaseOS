@@ -16,12 +16,9 @@ import { env } from '../config/env.js';
 import { validateAcyclicGraph } from '../engine/dagValidator.js';
 import { addDays } from '../engine/scheduleRerouter.js';
 import { generateProjectBlueprintFromPrompt } from './projectArchitectAiService.js';
-import {
-  createDraftInvoice,
-  sendInvoice,
-  generateInvoiceQrCode,
-} from './paypalInvoicingService.js';
+import { createDraftInvoice, sendInvoice, getInvoice } from './paypalInvoicingService.js';
 import { searchAndAuditSupplierProducts } from './channel3Service.js';
+import { computeStateFingerprint } from '../utils/moneyAndHash.js';
 import type {
   CreateCustomProjectInput,
   ManualTaskInputSchema,
@@ -95,6 +92,13 @@ export async function provisionCustomProject(
 
   // 2. Validate DAG via Kahn's algorithm (SEC-101)
   const taskIds = rawTasks.map((t) => t.task_id);
+  if (new Set(taskIds).size !== taskIds.length) {
+    throw new Error('DAG_INVALID: Task IDs must be unique');
+  }
+  const taskIdSet = new Set(taskIds);
+  if (rawDependencies.some((dep) => !taskIdSet.has(dep.from_task_id) || !taskIdSet.has(dep.to_task_id))) {
+    throw new Error('DAG_INVALID: Every dependency must reference tasks in the project');
+  }
   const dagValidation = validateAcyclicGraph(taskIds, rawDependencies);
   if (!dagValidation.valid) {
     throw new Error(
@@ -164,6 +168,7 @@ export async function provisionCustomProject(
       schedule_status: idx === 0 ? 'SCHEDULED' : (t.schedule_status || 'SCHEDULED'),
       paypal_invoice_id: null,
       paypal_invoice_number: null,
+      paypal_invoice_view_url: null,
       paypal_invoice_status: 'DRAFT',
       invoice_total_minor: t.invoice_total_minor ?? 250000,
       materials_unlock_minor: t.materials_unlock_minor ?? Math.floor((t.invoice_total_minor ?? 250000) * 0.4),
@@ -221,7 +226,16 @@ export async function provisionCustomProject(
       'ONBOARDING_PROJECT_PROVISIONED',
       'ALLOW',
       JSON.stringify([]),
-      `sha256_${Date.now()}`,
+      computeStateFingerprint({
+        projectId,
+        blockedTaskId: taskIds[0] ?? projectId,
+        promotedTaskId: taskIds[1] ?? taskIds[0] ?? projectId,
+        invoiceId: projectId,
+        unlockAmountMinor: 0,
+        channel3ProductId: projectId,
+        supplierTotalMinor: 0,
+        currency: input.currency || 'USD',
+      }),
       `Custom project "${projectName}" provisioned with ${canonicalTasks.length} phases and ${canonicalDeps.length} dependencies.`,
       JSON.stringify({ tasks_count: canonicalTasks.length, dependencies_count: canonicalDeps.length }),
       new Date().toISOString()
@@ -235,14 +249,23 @@ export async function provisionCustomProject(
   if (input.create_live_paypal_invoices !== false) {
     for (const task of canonicalTasks) {
       if (task.invoice_total_minor > 0) {
-        try {
-          const inv = await createDraftInvoice({
-            requestId: `cascade-custom-${task.task_id}-${Date.now()}`,
+        const requestId = computeStateFingerprint({
+          projectId,
+          blockedTaskId: task.task_id,
+          promotedTaskId: task.task_id,
+          invoiceId: `${projectId}:${task.task_id}`,
+          unlockAmountMinor: task.materials_unlock_minor,
+          channel3ProductId: task.sku_search_query ?? task.task_id,
+          supplierTotalMinor: task.invoice_total_minor,
+          currency: input.currency || 'USD',
+        }).replace(':', '-');
+        const inv = await createDraftInvoice({
+            requestId,
             invoicerBusinessName: 'CascadeOS Commercial Fitouts',
             invoicerEmail: env.PAYPAL_SANDBOX_MERCHANT_EMAIL,
             recipientEmail: input.client_email,
             memo: `${task.name} Milestone Invoice`,
-            currency: 'USD',
+            currency: input.currency || 'USD',
             dueDate: task.end_date,
             items: [
               {
@@ -252,33 +275,24 @@ export async function provisionCustomProject(
                 unitPriceMinor: task.invoice_total_minor,
               },
             ],
-          });
+        });
+        await sendInvoice(inv.id);
+        const sentInvoice = await getInvoice(inv.id);
+        const recipientViewUrl = sentInvoice.detail.metadata?.recipient_view_url ?? null;
+        if (!recipientViewUrl) throw new Error(`PayPal invoice ${inv.id} missing recipient_view_url`);
 
-          await sendInvoice(inv.id);
+        TaskRepo.updateInvoice(task.task_id, {
+          paypal_invoice_id: inv.id,
+          paypal_invoice_number: sentInvoice.detail.invoice_number ?? null,
+          paypal_invoice_view_url: recipientViewUrl,
+          paypal_invoice_status: 'SENT',
+        });
 
-          let qrBase64: string | null = null;
-          try {
-            const qrRes = await generateInvoiceQrCode(inv.id);
-            qrBase64 = qrRes.qr_code_base64;
-          } catch {
-            // QR requires SENT status
-          }
-
-          TaskRepo.updateInvoice(task.task_id, {
-            paypal_invoice_id: inv.id,
-            paypal_invoice_number: inv.detail?.invoice_number || `INV-${task.task_id}`,
-            paypal_invoice_status: 'SENT',
-            qr_code_base64: qrBase64,
-          });
-
-          liveInvoicesCreated.push({
-            task_id: task.task_id,
-            paypal_invoice_id: inv.id,
-            status: 'SENT',
-          });
-        } catch (err) {
-          console.warn(`[CustomProvisioner] PayPal Sandbox invoice skipped for ${task.task_id}:`, err);
-        }
+        liveInvoicesCreated.push({
+          task_id: task.task_id,
+          paypal_invoice_id: inv.id,
+          status: sentInvoice.status || 'SENT',
+        });
       }
     }
   }
@@ -287,12 +301,8 @@ export async function provisionCustomProject(
   if (input.run_live_channel3_audit !== false) {
     for (const task of canonicalTasks) {
       if (task.sku_search_query && task.required_quantity > 0) {
-        try {
-          const quotes = await searchAndAuditSupplierProducts(task, { forceRefresh: true });
-          liveChannel3QuotesCount += quotes.length;
-        } catch (err) {
-          console.warn(`[CustomProvisioner] Channel3 live search skipped for ${task.task_id}:`, err);
-        }
+        const quotes = await searchAndAuditSupplierProducts(task, { forceRefresh: true });
+        liveChannel3QuotesCount += quotes.length;
       }
     }
   }
@@ -349,9 +359,18 @@ export async function provisionTaskFinancials(
 
   // 1. Provision PayPal Sandbox invoice if missing
   if (!paypalInvoiceId && task.invoice_total_minor > 0) {
-    try {
-      const inv = await createDraftInvoice({
-        requestId: `cascade-task-fin-${task.task_id}-${Date.now()}`,
+    const requestId = computeStateFingerprint({
+        projectId,
+        blockedTaskId: task.task_id,
+        promotedTaskId: task.task_id,
+        invoiceId: `${projectId}:${task.task_id}`,
+        unlockAmountMinor: task.materials_unlock_minor,
+        channel3ProductId: task.sku_search_query ?? task.task_id,
+        supplierTotalMinor: task.invoice_total_minor,
+        currency: 'USD',
+    }).replace(':', '-');
+    const inv = await createDraftInvoice({
+        requestId,
         invoicerBusinessName: 'CascadeOS Commercial Fitouts',
         invoicerEmail: env.PAYPAL_SANDBOX_MERCHANT_EMAIL,
         recipientEmail: task.client_email,
@@ -366,38 +385,28 @@ export async function provisionTaskFinancials(
             unitPriceMinor: task.invoice_total_minor,
           },
         ],
-      });
+    });
 
-      await sendInvoice(inv.id);
-      paypalInvoiceId = inv.id;
+    await sendInvoice(inv.id);
+    paypalInvoiceId = inv.id;
+      const sentInvoice = await getInvoice(inv.id);
+      const recipientViewUrl = sentInvoice.detail.metadata?.recipient_view_url ?? null;
+      if (!recipientViewUrl) throw new Error(`PayPal invoice ${inv.id} missing recipient_view_url`);
 
-      try {
-        const qrRes = await generateInvoiceQrCode(inv.id);
-        qrBase64 = qrRes.qr_code_base64;
-      } catch {
-        // Ignored
-      }
-
-      TaskRepo.updateInvoice(task.task_id, {
+    TaskRepo.updateInvoice(task.task_id, {
         paypal_invoice_id: inv.id,
-        paypal_invoice_number: inv.detail?.invoice_number || `INV-${task.task_id}`,
+        paypal_invoice_number: sentInvoice.detail.invoice_number ?? null,
+        paypal_invoice_view_url: recipientViewUrl,
         paypal_invoice_status: 'SENT',
         qr_code_base64: qrBase64,
-      });
-    } catch (err) {
-      console.warn(`[ProvisionTaskFinancials] PayPal error for ${taskId}:`, err);
-    }
+    });
   }
 
   // 2. Run Channel3 search & audit if sku_search_query present
   let quotesCount = 0;
   if (task.sku_search_query && task.required_quantity > 0) {
-    try {
-      const quotes = await searchAndAuditSupplierProducts(task, { forceRefresh: true });
-      quotesCount = quotes.length;
-    } catch (err) {
-      console.warn(`[ProvisionTaskFinancials] Channel3 error for ${taskId}:`, err);
-    }
+    const quotes = await searchAndAuditSupplierProducts(task, { forceRefresh: true });
+    quotesCount = quotes.length;
   }
 
   const updatedTask = TaskRepo.findById(taskId)!;

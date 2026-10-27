@@ -11,13 +11,13 @@
  * - Full Dark & Light theme support
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
 import { toast } from 'sonner';
 import { useCascadeState } from '@/context/CascadeStateContext';
-import { formatMinorToUSD, truncateHash } from '@/utils/formatters';
+import { formatMinorToUSD, formatMinorToPayPalValue, formatVariancePct, truncateHash } from '@/utils/formatters';
 import { ShimmerButton } from '@/components/ui/shimmer-button';
 import {
   ShieldAlert,
@@ -40,6 +40,7 @@ import {
   Layers
 } from 'lucide-react';
 import type { ReasonCode } from '@/types/domain';
+import { useDialog } from './ui/useDialog';
 
 export const ApprovalCheckoutModal: React.FC = () => {
   const {
@@ -56,6 +57,9 @@ export const ApprovalCheckoutModal: React.FC = () => {
   const [isCopied, setIsCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'DIFF' | 'PAYPAL_CHECKOUT' | 'SUCCESS'>('DIFF');
+  const dialogRef = useDialog(isApprovalModalOpen && !!activePlan, () => { if (!isSubmitting) closeApprovalModal(); });
+  useEffect(() => { if (isApprovalModalOpen) { setCheckoutStep('DIFF'); setIsCopied(false); } }, [isApprovalModalOpen, activePlan?.plan_id]);
+  const canApprove = activePlan?.status === 'PROPOSED' && activePlan.policy_decision !== 'BLOCK' && !!approverName.trim();
 
   // Parse reason codes from JSON
   const reasonCodes: ReasonCode[] = useMemo(() => {
@@ -78,18 +82,29 @@ export const ApprovalCheckoutModal: React.FC = () => {
     return state.tasks.find((t) => t.task_id === activePlan.promoted_task_id) || null;
   }, [activePlan, state?.tasks]);
 
+  const selectedQuote = useMemo(
+    () => state?.supplierQuotes.find((quote) => quote.quote_id === activePlan?.selected_quote_id) ?? null,
+    [activePlan?.selected_quote_id, state?.supplierQuotes],
+  );
+  const phaseBudgetMinor = blockedTask?.phase_hardware_budget_max_minor;
+  const maxVariancePct = blockedTask?.max_allowed_variance_pct;
+  const observedTotal = selectedQuote?.total_minor ?? activePlan?.immediate_unlock_minor;
+  const budgetDifference = phaseBudgetMinor === undefined || observedTotal === undefined ? null : phaseBudgetMinor - observedTotal;
+  const predecessorTasks = (state?.dependencies ?? []).filter((edge) => edge.to_task_id === promotedTask?.task_id).map((edge) => state?.tasks.find((task) => task.task_id === edge.from_task_id));
+  const unmetCount = predecessorTasks.filter((task) => task?.schedule_status !== 'COMPLETED').length;
+
   // Copy fingerprint to clipboard
   const handleCopyFingerprint = () => {
     if (activePlan?.state_fingerprint) {
       navigator.clipboard.writeText(activePlan.state_fingerprint);
       setIsCopied(true);
       toast.success('SHA-256 Fingerprint copied to clipboard');
-      setTimeout(() => setIsCopied(false), 2000);
     }
   };
 
   // Trigger confetti burst
   const fireCelebration = () => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     confetti({
       particleCount: 80,
       spread: 70,
@@ -100,7 +115,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
 
   // Handle plan approval
   const handleApprove = async () => {
-    if (!activePlan) return;
+    if (!activePlan || !canApprove || isSubmitting) return;
     setIsSubmitting(true);
     try {
       const ok = await approvePlan(approverName, customNote || undefined);
@@ -117,12 +132,9 @@ export const ApprovalCheckoutModal: React.FC = () => {
     return null;
   }
 
-  // Real or fallback PayPal Sandbox Client ID
-  const paypalClientId =
-    import.meta.env.VITE_PAYPAL_CLIENT_ID ||
-    'BAAgZMY9rCerEaYttfDgL2Uknz71y2KeaoMR4YQ4JLesJuxB4zom6AjrsvAzrRrzQr9ylDE9RpwqcKpD0U';
+  const paypalClientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
 
-  const unlockAmountUSD = ((activePlan.immediate_unlock_minor || 250000) / 100).toFixed(2);
+  const unlockAmountUSD = formatMinorToPayPalValue(activePlan.immediate_unlock_minor);
 
   return (
     <AnimatePresence>
@@ -133,16 +145,21 @@ export const ApprovalCheckoutModal: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={closeApprovalModal}
-          className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-md transition-opacity"
+          className="fixed inset-0 dialog-backdrop"
         />
 
         {/* Modal Window: Double-Bezel Hardware Enclosure */}
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="approval-dialog-title"
+          tabIndex={-1}
           initial={{ scale: 0.95, opacity: 0, y: 16 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 16 }}
           transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className="relative w-full max-w-4xl bg-white dark:bg-[#0c0e14] text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden z-10 my-8 transition-colors duration-200"
+          className="dialog-panel approval-panel relative w-full max-w-4xl overflow-hidden z-10 my-8"
         >
           {/* Top Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-white/[0.08] bg-neutral-50 dark:bg-[#090b10]">
@@ -152,20 +169,18 @@ export const ApprovalCheckoutModal: React.FC = () => {
               </div>
               <div>
                 <div className="flex items-center space-x-2">
-                  <span className="text-xs font-mono font-medium tracking-wider text-amber-600 dark:text-amber-400 uppercase">
-                    Deterministic Policy Gate
-                  </span>
                   <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/60">
                     {activePlan.policy_decision}
                   </span>
                 </div>
-                <h3 className="text-sm font-semibold text-neutral-900 dark:text-white">
-                  Plan Approval & PayPal Split
+                <h3 id="approval-dialog-title" className="text-sm font-semibold text-neutral-900 dark:text-white">
+                  Review recovery plan
                 </h3>
               </div>
             </div>
 
             <button
+              aria-label="Close recovery approval"
               onClick={closeApprovalModal}
               className="p-1.5 rounded-lg bg-neutral-100 dark:bg-neutral-900 text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 transition-colors"
             >
@@ -274,33 +289,33 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         <tr className="hover:bg-neutral-50/50 dark:hover:bg-white/[0.02]">
                           <td className="py-2 px-3">
                             <span className="font-semibold text-neutral-800 dark:text-neutral-200">Phase Budget Cap</span>
-                            <div className="text-[10px] text-neutral-500 font-sans">Integer minor unit ceiling</div>
+                            <div className="text-[10px] text-neutral-500 font-sans">{blockedTask?.name ?? activePlan.blocked_task_id}</div>
                           </td>
                           <td className="py-2 px-3">
-                            <span className="text-neutral-700 dark:text-neutral-300 font-medium">$1,600.00</span>
-                            <div className="text-[10px] text-neutral-500">(160,000¢)</div>
+                            <span className="text-neutral-700 dark:text-neutral-300 font-medium">{phaseBudgetMinor ? formatMinorToUSD(phaseBudgetMinor) : '—'}</span>
+                            <div className="text-[10px] text-neutral-500">{phaseBudgetMinor ? `(${phaseBudgetMinor.toLocaleString()}¢)` : 'No budget loaded'}</div>
                           </td>
                           <td className="py-2 px-3">
-                            {reasonCodes.includes('TOTAL_EXCEEDS_PHASE_BUDGET') ? (
+                            {budgetDifference !== null && budgetDifference < 0 ? (
                               <>
-                                <span className="text-rose-600 dark:text-rose-400 font-semibold">$1,960.00</span>
-                                <div className="text-[10px] text-neutral-500">(196,000¢)</div>
+                                 <span className="text-rose-600 dark:text-rose-400 font-semibold">{observedTotal === undefined ? '—' : formatMinorToUSD(observedTotal)}</span>
+                                <div className="text-[10px] text-neutral-500">Selected proposal</div>
                               </>
                             ) : (
                               <>
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{formatMinorToUSD(activePlan.immediate_unlock_minor || 139600)}</span>
-                                <div className="text-[10px] text-neutral-500">({(activePlan.immediate_unlock_minor || 139600).toLocaleString()}¢)</div>
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{observedTotal === undefined ? '—' : formatMinorToUSD(observedTotal)}</span>
+                                  <div className="text-[10px] text-neutral-500">Selected quote total</div>
                               </>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right">
-                            {reasonCodes.includes('TOTAL_EXCEEDS_PHASE_BUDGET') ? (
+                            {budgetDifference !== null && budgetDifference < 0 ? (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
-                                EXCEEDS (+$360.00)
+                                {budgetDifference === null ? 'Not evaluated' : `${formatMinorToUSD(Math.abs(budgetDifference))} over budget`}
                               </span>
                             ) : (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/50">
-                                COMPLIANT (-$204.00)
+                                {budgetDifference === null ? 'Not evaluated' : budgetDifference >= 0 ? `${formatMinorToUSD(budgetDifference)} headroom` : 'Over budget'}
                               </span>
                             )}
                           </td>
@@ -310,33 +325,33 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         <tr className="hover:bg-neutral-50/50 dark:hover:bg-white/[0.02]">
                           <td className="py-2 px-3">
                             <span className="font-semibold text-neutral-800 dark:text-neutral-200">Price-Creep Variance</span>
-                            <div className="text-[10px] text-neutral-500 font-sans">Baseline: $380.00 / unit</div>
+                              <div className="text-[10px] text-neutral-500 font-sans">{blockedTask?.name ?? activePlan.blocked_task_id}<br />Baseline: {blockedTask?.historical_unit_price_minor ? `${formatMinorToUSD(blockedTask.historical_unit_price_minor)} / unit` : '—'}</div>
                           </td>
                           <td className="py-2 px-3">
-                            <span className="text-neutral-700 dark:text-neutral-300 font-medium">&le; +10.00%</span>
+                           <span className="text-neutral-700 dark:text-neutral-300 font-medium">&le; {maxVariancePct ?? '—'}%</span>
                             <div className="text-[10px] text-neutral-500">Max allowed tolerance</div>
                           </td>
                           <td className="py-2 px-3">
-                            {reasonCodes.includes('VENDOR_PRICE_CREEP_EXCEEDED') ? (
+                            {selectedQuote && maxVariancePct !== undefined && selectedQuote.variance_vs_historical_pct > maxVariancePct ? (
                               <>
-                                <span className="text-rose-600 dark:text-rose-400 font-semibold">+28.95% ($490.00/u)</span>
-                                <div className="text-[10px] text-neutral-500">Incumbent Quote</div>
+                                 <span className="text-rose-600 dark:text-rose-400 font-semibold">{selectedQuote ? `${formatVariancePct(selectedQuote.variance_vs_historical_pct)} (${formatMinorToUSD(selectedQuote.unit_price_minor)}/u)` : '—'}</span>
+                                <div className="text-[10px] text-neutral-500">Selected quote</div>
                               </>
                             ) : (
                               <>
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-8.16% ($349.00/u)</span>
+                                 <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{selectedQuote ? `${formatVariancePct(selectedQuote.variance_vs_historical_pct)} (${formatMinorToUSD(selectedQuote.unit_price_minor)}/u)` : '—'}</span>
                                 <div className="text-[10px] text-neutral-500">Channel3 Live Discovery</div>
                               </>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right">
-                            {reasonCodes.includes('VENDOR_PRICE_CREEP_EXCEEDED') ? (
+                            {selectedQuote && maxVariancePct !== undefined && selectedQuote.variance_vs_historical_pct > maxVariancePct ? (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
                                 CREEP BLOCKED
                               </span>
                             ) : (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/50">
-                                ARBITRAGE SAVES $564
+                                 {selectedQuote ? 'Within price threshold' : 'Not evaluated'}
                               </span>
                             )}
                           </td>
@@ -346,33 +361,33 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         <tr className="hover:bg-neutral-50/50 dark:hover:bg-white/[0.02]">
                           <td className="py-2 px-3">
                             <span className="font-semibold text-neutral-800 dark:text-neutral-200">Hard Dependencies</span>
-                            <div className="text-[10px] text-neutral-500 font-sans">Finish-to-start topological DAG</div>
+                            <div className="text-[10px] text-neutral-500 font-sans">Release: {promotedTask?.name ?? activePlan.promoted_task_id}</div>
                           </td>
                           <td className="py-2 px-3">
                             <span className="text-neutral-700 dark:text-neutral-300 font-medium">All Completed</span>
                             <div className="text-[10px] text-neutral-500">Zero unmet prerequisites</div>
                           </td>
                           <td className="py-2 px-3">
-                            {reasonCodes.includes('HARD_DEPENDENCY_VIOLATION') ? (
+                            {unmetCount > 0 ? (
                               <>
-                                <span className="text-rose-600 dark:text-rose-400 font-semibold">Phase 2 Incomplete</span>
+                                <span className="text-rose-600 dark:text-rose-400 font-semibold">{unmetCount} unfinished predecessors</span>
                                 <div className="text-[10px] text-neutral-500">Violates topological sequence</div>
                               </>
                             ) : (
                               <>
-                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Phase 1 COMPLETED</span>
-                                <div className="text-[10px] text-neutral-500">0 unmet dependencies</div>
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{predecessorTasks.length - unmetCount} of {predecessorTasks.length} complete</span>
+                                <div className="text-[10px] text-neutral-500">{unmetCount} unmet dependencies</div>
                               </>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right">
-                            {reasonCodes.includes('HARD_DEPENDENCY_VIOLATION') ? (
+                            {unmetCount > 0 ? (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
                                 VIOLATION
                               </span>
                             ) : (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/50">
-                                100% SATISFIED
+                                {unmetCount ? 'Needs review' : 'Predecessors complete'}
                               </span>
                             )}
                           </td>
@@ -382,27 +397,27 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         <tr className="hover:bg-neutral-50/50 dark:hover:bg-white/[0.02]">
                           <td className="py-2 px-3">
                             <span className="font-semibold text-neutral-800 dark:text-neutral-200">Warehouse Staging</span>
-                            <div className="text-[10px] text-neutral-500 font-sans">Physical materials readiness</div>
+                            <div className="text-[10px] text-neutral-500 font-sans">Release: {promotedTask?.name ?? activePlan.promoted_task_id}</div>
                           </td>
                           <td className="py-2 px-3">
                             <span className="text-neutral-700 dark:text-neutral-300 font-medium">materials_in_warehouse == 1</span>
                             <div className="text-[10px] text-neutral-500">On-site inventory ready</div>
                           </td>
                           <td className="py-2 px-3">
-                            {reasonCodes.includes('MATERIALS_NOT_IN_WAREHOUSE') ? (
+                            {!promotedTask?.materials_in_warehouse ? (
                               <span className="text-rose-600 dark:text-rose-400 font-semibold">Not in warehouse (0)</span>
                             ) : (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Staged in Warehouse (1)</span>
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{promotedTask?.materials_in_warehouse ? 'Staged in warehouse' : 'Not staged'}</span>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right">
-                            {reasonCodes.includes('MATERIALS_NOT_IN_WAREHOUSE') ? (
+                            {!promotedTask?.materials_in_warehouse ? (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
                                 NOT STAGED
                               </span>
                             ) : (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/50">
-                                READY TO PROMOTE
+                                {promotedTask?.materials_in_warehouse ? 'Staged' : 'Needs review'}
                               </span>
                             )}
                           </td>
@@ -412,27 +427,27 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         <tr className="hover:bg-neutral-50/50 dark:hover:bg-white/[0.02]">
                           <td className="py-2 px-3">
                             <span className="font-semibold text-neutral-800 dark:text-neutral-200">Cost Nullability & FX</span>
-                            <div className="text-[10px] text-neutral-500 font-sans">Fail-closed validation (SEC-006)</div>
+                            <div className="text-[10px] text-neutral-500 font-sans">{selectedQuote?.product_title ?? 'No selected quote'}</div>
                           </td>
                           <td className="py-2 px-3">
                             <span className="text-neutral-700 dark:text-neutral-300 font-medium">USD / Non-null Costs</span>
                             <div className="text-[10px] text-neutral-500">Zero null shipping/tax</div>
                           </td>
                           <td className="py-2 px-3">
-                            {reasonCodes.includes('UNKNOWN_COST_FIELD') || reasonCodes.includes('CURRENCY_MISMATCH') ? (
-                              <span className="text-rose-600 dark:text-rose-400 font-semibold">Null Shipping / Tax</span>
+                            {!selectedQuote || selectedQuote.shipping_minor === null || selectedQuote.tax_minor === null || selectedQuote.currency !== state?.project.currency ? (
+                              <span className="text-rose-600 dark:text-rose-400 font-semibold">Missing costs or currency mismatch</span>
                             ) : (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">USD / Verified Freight</span>
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{selectedQuote ? `${selectedQuote.currency} / ${selectedQuote.shipping_minor === null || selectedQuote.tax_minor === null ? 'Incomplete costs' : 'Costs recorded'}` : 'No selected quote'}</span>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right">
-                            {reasonCodes.includes('UNKNOWN_COST_FIELD') ? (
+                            {!selectedQuote || selectedQuote.shipping_minor === null || selectedQuote.tax_minor === null || selectedQuote.currency !== state?.project.currency ? (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
                                 UNKNOWN COST BLOCK
                               </span>
                             ) : (
                               <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/50">
-                                VALIDATED
+                                {selectedQuote && selectedQuote.shipping_minor !== null && selectedQuote.tax_minor !== null ? 'Recorded' : 'Needs review'}
                               </span>
                             )}
                           </td>
@@ -445,7 +460,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                 {/* Financial Impact Comparison Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200 dark:border-white/[0.06]">
-                    <div className="text-[11px] font-mono text-neutral-500 uppercase">Idle Crew Hours Saved</div>
+                    <div className="text-[11px] font-mono text-neutral-500 uppercase">Idle crew hours at risk</div>
                     <div className="mt-1 text-xl font-semibold font-mono text-neutral-900 dark:text-white flex items-baseline space-x-1">
                       <span>{activePlan.idle_crew_hours}</span>
                       <span className="text-xs font-normal text-neutral-500">hours</span>
@@ -456,15 +471,15 @@ export const ApprovalCheckoutModal: React.FC = () => {
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-900/40 border border-neutral-200 dark:border-white/[0.06]">
-                    <div className="text-[11px] font-mono text-neutral-500 uppercase">SLA Penalty Eliminated</div>
+                    <div className="text-[11px] font-mono text-neutral-500 uppercase">SLA penalty exposure</div>
                     <div className="mt-1 text-xl font-semibold font-mono text-emerald-600 dark:text-emerald-400">
                       {formatMinorToUSD(activePlan.sla_penalty_minor)}
                     </div>
-                    <div className="text-xs text-neutral-500 mt-0.5">Liquidated damages prevented</div>
+                    <div className="text-xs text-neutral-500 mt-0.5">Estimated by the recovery engine</div>
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-neutral-50 dark:bg-neutral-900/40 border border-rose-200 dark:border-rose-900/40">
-                    <div className="text-[11px] font-mono text-rose-600 dark:text-rose-400 uppercase font-medium">Total Avoided</div>
+                    <div className="text-[11px] font-mono text-rose-600 dark:text-rose-400 uppercase font-medium">Total exposure</div>
                     <div className="mt-1 text-xl font-semibold font-mono text-rose-600 dark:text-rose-400">
                       {formatMinorToUSD(activePlan.total_exposure_minor)}
                     </div>
@@ -504,7 +519,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                     <div className="flex items-center justify-between text-xs font-mono">
                       <span className="text-neutral-700 dark:text-neutral-300 font-medium flex items-center space-x-1.5">
                         <Send className="w-3 h-3 text-neutral-500" />
-                        <span>AI Payment Nudge (Groq OSS 120B)</span>
+                        <span>Draft payment reminder</span>
                       </span>
                     </div>
                     <p className="text-xs text-neutral-600 dark:text-neutral-300 italic bg-white dark:bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 leading-relaxed font-sans">
@@ -519,6 +534,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                     <div>
                       <label className="text-neutral-500 block mb-1 font-mono text-[10px]">Approver Identity / Role</label>
                       <input
+                        aria-label="Approver identity or role"
                         type="text"
                         value={approverName}
                         onChange={(e) => setApproverName(e.target.value)}
@@ -530,6 +546,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                       <input
                         type="text"
                         placeholder="e.g. Approved per protocol CP-44"
+                        aria-label="Audit note (optional)"
                         value={customNote}
                         onChange={(e) => setCustomNote(e.target.value)}
                         className="w-full px-3 py-1.5 bg-white dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-white font-mono focus:outline-none focus:border-neutral-500 transition-colors"
@@ -548,7 +565,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
 
                     <button
                       onClick={handleApprove}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || !canApprove}
                       className="w-full sm:w-auto px-5 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 font-medium text-xs font-mono hover:opacity-90 transition-all flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50"
                     >
                       <Lock className="w-3.5 h-3.5" />
@@ -597,7 +614,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                       </div>
                     )}
                     <div className="text-[10px] text-neutral-500 font-mono mt-2">
-                      Invoice #{blockedTask?.paypal_invoice_number || 'INV-CASCADE-SPLIT'}
+                       Invoice #{blockedTask?.paypal_invoice_number || 'Not provisioned'}
                     </div>
                   </div>
 
@@ -612,8 +629,14 @@ export const ApprovalCheckoutModal: React.FC = () => {
                       </span>
                     </div>
 
-                    <div className="pt-1">
-                      <PayPalScriptProvider
+                     <div className="pt-1">
+                       {!paypalClientId && (
+                         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                           PayPal JS SDK client ID missing. Set <code>VITE_PAYPAL_CLIENT_ID</code> to enable checkout.
+                         </div>
+                       )}
+                       {paypalClientId && (
+                       <PayPalScriptProvider
                         options={{
                           clientId: paypalClientId,
                           currency: 'USD',
@@ -622,6 +645,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         }}
                       >
                         <PayPalButtons
+                          disabled={isSubmitting || !canApprove}
                           style={{
                             layout: 'vertical',
                             color: 'gold',
@@ -661,7 +685,8 @@ export const ApprovalCheckoutModal: React.FC = () => {
                             });
                           }}
                         />
-                      </PayPalScriptProvider>
+                       </PayPalScriptProvider>
+                       )}
                     </div>
                   </div>
                 </div>
@@ -676,7 +701,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
 
                   <button
                     onClick={handleApprove}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || !canApprove}
                     className="px-4 py-2 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 font-medium text-xs font-mono hover:opacity-90 transition-all flex items-center space-x-1.5 disabled:opacity-50"
                   >
                     <Lock className="w-3.5 h-3.5" />

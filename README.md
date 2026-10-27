@@ -203,6 +203,14 @@ The policy firewall (`server/src/engine/policyEngine.ts`) guarantees safety inde
 
 ## 6. Getting Started & Local Installation
 
+### Current frontend workspace
+
+The redesigned client uses a project-delivery ledger with six destinations: **Delivery overview**, **Schedule**, **Recovery plans**, **Supplier quotes**, **Dependencies**, and **Analytics studio**. The overview connects each milestone to its invoice, material readiness, and predecessor requirements. The sidebar also opens audit exports, the FinOps assistant, project creation, and appearance settings.
+
+Refresh reloads project data. Sandbox scenario controls and the explicitly labelled canonical-demo reset are under **Recovery plans**. On phones, schedule rows open the same editable phase-financial drawer used on desktop.
+
+See [`client/PRODUCT.md`](client/PRODUCT.md) for confirmed product context and [`client/REDESIGN.md`](client/REDESIGN.md) for implementation and verification details. Run frontend API contract checks with `npm run test --workspace=client`.
+
 ### Prerequisites
 - **Node.js**: `>= 20.11.0` (with native C++ compilation tools for `better-sqlite3`)
 - **npm**: `>= 10.0.0`

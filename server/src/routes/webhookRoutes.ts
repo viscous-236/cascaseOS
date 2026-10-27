@@ -189,9 +189,14 @@ function reconcileWebhookEvent(event: PayPalWebhookEvent): void {
 
       case 'INVOICING.INVOICE.UPDATED': {
         // Sync the updated status back into tasks
+        const normalizedStatus = eventStatus.toUpperCase();
+        const taskStatus = ['DRAFT', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID', 'CANCELLED']
+          .includes(normalizedStatus)
+          ? normalizedStatus
+          : 'SENT';
         db.prepare(
           `UPDATE tasks SET paypal_invoice_status = ? WHERE paypal_invoice_id = ?`
-        ).run(eventStatus.toUpperCase(), resourceId);
+        ).run(taskStatus, resourceId);
 
         db.prepare(
           `INSERT INTO audit_events
@@ -219,27 +224,31 @@ function reconcileWebhookEvent(event: PayPalWebhookEvent): void {
         const captureId = resourceId;
         const customId = event.resource?.custom_id ?? null;
 
+        const linkedTask = db.prepare<[string, string], { task_id: string; project_id: string }>(
+          `SELECT task_id, project_id FROM paypal_transactions
+           WHERE paypal_resource_id = ? OR paypal_capture_id = ?
+           LIMIT 1`
+        ).get(captureId, captureId);
+
         db.prepare(
           `UPDATE tasks
-           SET schedule_status = 'MATERIALS_ORDERED'
-           WHERE task_id = (
-             SELECT task_id FROM paypal_transactions
-             WHERE paypal_resource_id = ? OR paypal_capture_id = ?
-             LIMIT 1
-           )`
-        ).run(captureId, captureId);
+            SET schedule_status = 'MATERIALS_ORDERED', materials_in_warehouse = 1
+            WHERE task_id = ?`
+        ).run(linkedTask?.task_id ?? '');
 
         db.prepare(
           `INSERT INTO audit_events
            (event_id, project_id, task_id, plan_id, event_type, decision,
             reason_codes_json, state_fingerprint, paypal_reference_id,
             channel3_reference_id, summary, payload_json, created_at)
-           VALUES (?, 'proj_apex_clinic_01', NULL, ?, 'WEBHOOK_CAPTURE_COMPLETED',
+            VALUES (?, ?, ?, ?, 'WEBHOOK_CAPTURE_COMPLETED',
                    'ALLOW', '[]', NULL, ?, NULL,
                    'PayPal capture COMPLETED — task transitioning to MATERIALS_ORDERED',
                    ?, ?)`
         ).run(
           randomUUID(),
+          linkedTask?.project_id ?? 'unknown',
+          linkedTask?.task_id ?? null,
           customId,
           captureId,
           JSON.stringify(event),

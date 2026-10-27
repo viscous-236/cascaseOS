@@ -21,14 +21,15 @@ export const bootstrapProjectSchema = z.object({
       skipPayPal: z.boolean().optional().default(false),
       skipChannel3: z.boolean().optional().default(false),
     })
+    .strict()
     .default({}),
-});
+}).strict();
 
 export const getProjectStateSchema = z.object({
   params: z.object({
     projectId: z.string().min(1, 'projectId is required'),
-  }),
-});
+  }).strict(),
+}).strict();
 
 // ---------------------------------------------------------------------------
 // 2. Scenario Trigger Schema
@@ -41,15 +42,16 @@ export const triggerScenarioSchema = z.object({
         message: "scenarioId must be 'SCENARIO_A', 'SCENARIO_B', or 'SCENARIO_C'",
       }),
     }),
-  }),
+  }).strict(),
   body: z
     .object({
       projectId: z.string().optional(),
       targetTaskId: z.string().optional(),
       forceRefresh: z.boolean().optional().default(false),
     })
+    .strict()
     .default({}),
-});
+}).strict();
 
 // ---------------------------------------------------------------------------
 // 3. Recovery Plan Approval Schema
@@ -58,15 +60,15 @@ export const triggerScenarioSchema = z.object({
 export const approvePlanSchema = z.object({
   params: z.object({
     planId: z.string().min(1, 'planId is required'),
-  }),
+  }).strict(),
   body: z.object({
     approvedFingerprint: z
       .string()
       .regex(/^(sha256:)?[a-f0-9]{64}$/i, 'approvedFingerprint must be a valid SHA-256 fingerprint'),
     approverActor: z.string().min(1, 'approverActor is required'),
     customNudgeNote: z.string().max(1000).optional(),
-  }),
-});
+  }).strict(),
+}).strict();
 
 // ---------------------------------------------------------------------------
 // 4. PayPal Orders Schemas
@@ -80,18 +82,18 @@ export const createPayPalOrderSchema = z.object({
     approvedFingerprint: z
       .string()
       .regex(/^(sha256:)?[a-f0-9]{64}$/i, 'approvedFingerprint must be a valid SHA-256 fingerprint'),
-  }),
-});
+  }).strict(),
+}).strict();
 
 export const capturePayPalOrderSchema = z.object({
   params: z.object({
     orderId: z.string().min(1, 'orderId is required'),
-  }),
+  }).strict(),
   body: z.object({
     taskId: z.string().min(1, 'taskId is required'),
     planId: z.string().optional(),
-  }),
-});
+  }).strict(),
+}).strict();
 
 // ---------------------------------------------------------------------------
 // 5. Studio Agent Chat Schema
@@ -109,7 +111,7 @@ export const studioAgentChatSchema = z.object({
       )
       .optional()
       .default([]),
-    projectId: z.string().optional().default('proj_apex_clinic_01'),
+    projectId: z.string().optional(),
     activeTaskId: z.string().optional(),
-  }),
-});
+  }).strict(),
+}).strict();

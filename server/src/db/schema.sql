@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   ),
   paypal_invoice_id TEXT,
   paypal_invoice_number TEXT,
+  paypal_invoice_view_url TEXT,
   paypal_invoice_status TEXT NOT NULL CHECK (
     paypal_invoice_status IN ('DRAFT', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID', 'CANCELLED')
   ),

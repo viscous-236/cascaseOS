@@ -15,12 +15,12 @@
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
-import { getDb, TaskRepo } from '../db/database.js';
+import { getDb, ProjectRepo, TaskRepo } from '../db/database.js';
 import { env } from '../config/env.js';
 import { studioAgentChatSchema } from '../schemas/apiSchemas.js';
 import { analyzeProjectBlastRadius } from '../engine/criticalPathEngine.js';
 import { searchAndAuditSupplierProducts } from '../services/channel3Service.js';
-import { APEX_PROJECT_ID } from '../services/projectBootstrapService.js';
+import { minorUnitsToDisplayString } from '../utils/moneyAndHash.js';
 import type { TaskDependency } from '../types/domain.js';
 
 const router = Router();
@@ -46,7 +46,7 @@ const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'refreshChannel3Quotes',
+       name: 'auditSupplierQuoteWithChannel3',
       description:
         'Queries the live Channel3 Product Graph for replacement medical diagnostic displays, calculating savings vs. incumbent vendor quotes.',
       parameters: {
@@ -89,15 +89,16 @@ const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 
 async function executeAgentTool(
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  projectId: string
 ): Promise<unknown> {
   const db = getDb();
-  const tasks = TaskRepo.findByProject(APEX_PROJECT_ID);
+  const tasks = TaskRepo.findByProject(projectId);
   const dependencies = db
     .prepare<[string], TaskDependency>(
       'SELECT * FROM task_dependencies WHERE project_id = ?'
     )
-    .all(APEX_PROJECT_ID);
+    .all(projectId);
 
   switch (toolName) {
     case 'inspectBlastRadius': {
@@ -106,20 +107,22 @@ async function executeAgentTool(
         blocked_task_ids: radius.blocked_task_ids,
         idle_crew_hours: radius.idle_crew_hours,
         idle_labor_cost_minor: radius.idle_labor_cost_minor,
-        idle_labor_cost_formatted: `$${(radius.idle_labor_cost_minor / 100).toFixed(2)}`,
+         idle_labor_cost_formatted: minorUnitsToDisplayString(radius.idle_labor_cost_minor, 'USD'),
         sla_penalty_minor: radius.sla_penalty_minor,
-        sla_penalty_formatted: `$${(radius.sla_penalty_minor / 100).toFixed(2)}`,
+         sla_penalty_formatted: minorUnitsToDisplayString(radius.sla_penalty_minor, 'USD'),
         total_exposure_minor: radius.total_exposure_minor,
-        total_exposure_formatted: `$${(radius.total_exposure_minor / 100).toFixed(2)}`,
+         total_exposure_formatted: minorUnitsToDisplayString(radius.total_exposure_minor, 'USD'),
         promotable_candidates: radius.promotable_candidate_ids,
       };
     }
 
-    case 'refreshChannel3Quotes': {
-      const phase2Task = tasks.find((t) => t.task_id === 'task_phase_2_displays');
-      if (!phase2Task) return { error: 'Phase 2 task not found' };
+    case 'auditSupplierQuoteWithChannel3': {
+      const hardwareTask = tasks.find(
+        (task) => Boolean(task.sku_search_query) && task.required_quantity > 0
+      );
+      if (!hardwareTask) return { error: 'No hardware task found in project' };
 
-      const quotes = await searchAndAuditSupplierProducts(phase2Task, {
+      const quotes = await searchAndAuditSupplierProducts(hardwareTask, {
         forceRefresh: Boolean(args.forceRefresh ?? true),
       });
 
@@ -129,8 +132,8 @@ async function executeAgentTool(
           ? {
               title: quotes[0].product_title,
               merchant: quotes[0].merchant_name,
-              unitPrice: `$${(quotes[0].unit_price_minor / 100).toFixed(2)}`,
-              savingsVsIncumbent: `$${(quotes[0].savings_vs_incumbent_minor / 100).toFixed(2)}`,
+               unitPrice: minorUnitsToDisplayString(quotes[0].unit_price_minor, quotes[0].currency),
+               savingsVsIncumbent: minorUnitsToDisplayString(quotes[0].savings_vs_incumbent_minor, quotes[0].currency),
               varianceVsHistoricalPct: `${quotes[0].variance_vs_historical_pct.toFixed(2)}%`,
             }
           : null,
@@ -162,6 +165,7 @@ router.post('/studio-agent/chat', async (req: Request, res: Response): Promise<v
   }
 
   const { message, conversationHistory } = validation.data.body;
+  const projectId = validation.data.body.projectId ?? ProjectRepo.findAll()[0]?.project_id ?? 'uninitialized-project';
   const isSse = req.headers.accept?.includes('text/event-stream');
 
   const openai = new OpenAI({
@@ -226,7 +230,7 @@ Your role:
             // Empty
           }
 
-          const toolResult = await executeAgentTool(toolCall.function.name, parsedArgs);
+           const toolResult = await executeAgentTool(toolCall.function.name, parsedArgs, projectId);
 
           sendEvent('TOOL_CALL_END', {
             toolCallId: toolCall.id,
@@ -241,7 +245,10 @@ Your role:
       sendEvent('RUN_FINISHED', { status: 'COMPLETED' });
       res.end();
     } catch (err) {
-      console.warn('[StudioAgent] SSE OpenAI execution warning:', err);
+      if (env.NODE_ENV !== 'test') {
+        res.status(502).json({ error: `Studio Agent execution failed: ${String(err)}` });
+        return;
+      }
       sendEvent('TEXT_MESSAGE_CONTENT', {
         delta: 'FinOps advisory engine active. Project tasks and critical-path blast radius are synchronized in SQLite.',
       });
@@ -270,7 +277,7 @@ Your role:
           } catch {
             // Empty
           }
-          const result = await executeAgentTool(toolCall.function.name, parsedArgs);
+           const result = await executeAgentTool(toolCall.function.name, parsedArgs, projectId);
           toolResults.push({ name: toolCall.function.name, result });
         }
       }
@@ -286,7 +293,10 @@ Your role:
         toolResults,
       });
     } catch (err) {
-      console.warn('[StudioAgent] JSON execution warning (using fallback response):', err);
+      if (env.NODE_ENV !== 'test') {
+        res.status(502).json({ error: `Studio Agent execution failed: ${String(err)}` });
+        return;
+      }
       res.status(200).json({
         role: 'assistant',
         content:

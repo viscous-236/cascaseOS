@@ -68,6 +68,33 @@ export interface FinOpsExplanationResult {
 
 let _openai: OpenAI | null = null;
 
+const NUDGE_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['subject', 'body', 'summary', 'tone', 'materials_unlock_amount_formatted', 'invoice_total_amount_formatted', 'exposure_at_risk_formatted', 'key_call_to_action'],
+  properties: {
+    subject: { type: 'string', minLength: 1 },
+    body: { type: 'string', minLength: 1 },
+    summary: { type: 'string', minLength: 1 },
+    tone: { type: 'string', enum: ['warm_collaborative', 'urgent_informative'] },
+    materials_unlock_amount_formatted: { type: 'string' },
+    invoice_total_amount_formatted: { type: 'string' },
+    exposure_at_risk_formatted: { type: 'string' },
+    key_call_to_action: { type: 'string', minLength: 1 },
+  },
+} as const;
+
+const FINOPS_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['headline', 'reason_summary', 'remediation_steps'],
+  properties: {
+    headline: { type: 'string', minLength: 1 },
+    reason_summary: { type: 'string', minLength: 1 },
+    remediation_steps: { type: 'array', items: { type: 'string', minLength: 1 } },
+  },
+} as const;
+
 function getOpenAIClient(): OpenAI {
   if (_openai === null) {
     _openai = new OpenAI({
@@ -141,7 +168,10 @@ Required JSON structure:
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
       model: env.OPENAI_MODEL,
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'cascade_client_nudge', strict: true, schema: NUDGE_JSON_SCHEMA },
+      },
       temperature: 0.3,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -152,19 +182,20 @@ Required JSON structure:
     const content = response.choices[0]?.message?.content;
     if (content) {
       const parsed = JSON.parse(content) as Partial<ClientNudgeResult>;
-      return {
-        subject: parsed.subject || `Milestone Update: ${safeProjectName} - Partial Materials Unlock`,
-        body: parsed.body || createDeterministicNudgeBody(params, unlockFormatted, totalFormatted),
-        summary: parsed.summary || `Partial unlock of ${unlockFormatted} available to keep ${safeTaskName} on schedule.`,
-        tone: 'warm_collaborative',
-        materials_unlock_amount_formatted: unlockFormatted,
-        invoice_total_amount_formatted: totalFormatted,
-        exposure_at_risk_formatted: exposureFormatted,
-        key_call_to_action: parsed.key_call_to_action || `Review & Unlock Materials (${unlockFormatted}) via PayPal`,
-      };
+      if (
+        typeof parsed.subject !== 'string' || typeof parsed.body !== 'string' ||
+        typeof parsed.summary !== 'string' || typeof parsed.key_call_to_action !== 'string'
+      ) throw new Error('Nudge response failed strict validation');
+
+      const exactFinancialFacts = `Exact payment facts: full invoice ${totalFormatted}; materials unlock ${unlockFormatted}; exposure at risk ${exposureFormatted}.`;
+      const body = parsed.body.includes(unlockFormatted) && parsed.body.includes(totalFormatted) && parsed.body.includes(exposureFormatted)
+        ? parsed.body
+        : `${parsed.body.trim()}\n\n${exactFinancialFacts}`;
+
+      return { ...parsed, body, tone: parsed.tone === 'urgent_informative' ? parsed.tone : 'warm_collaborative', materials_unlock_amount_formatted: unlockFormatted, invoice_total_amount_formatted: totalFormatted, exposure_at_risk_formatted: exposureFormatted } as ClientNudgeResult;
     }
   } catch (err) {
-    console.warn('[NudgeBot] OpenAI call failed or key inactive — using deterministic fallback (GUD-003):', err);
+    if (env.NODE_ENV !== 'test') throw new Error(`Nudge-Bot generation failed: ${String(err)}`);
   }
 
   // Deterministic fallback (guarantees zero downtime and mathematical exactness)
@@ -217,7 +248,10 @@ Required JSON structure:
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
       model: env.OPENAI_MODEL,
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'cascade_finops_explanation', strict: true, schema: FINOPS_JSON_SCHEMA },
+      },
       temperature: 0.2,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -228,17 +262,11 @@ Required JSON structure:
     const content = response.choices[0]?.message?.content;
     if (content) {
       const parsed = JSON.parse(content) as Partial<FinOpsExplanationResult>;
-      return {
-        headline: parsed.headline || `${params.decision}: Policy evaluation for ${safeTaskName}`,
-        reason_summary: parsed.reason_summary || createDeterministicReasonSummary(params),
-        policy_decision: params.decision,
-        remediation_steps: Array.isArray(parsed.remediation_steps)
-          ? (parsed.remediation_steps as string[])
-          : createDeterministicRemediationSteps(params),
-      };
+      if (typeof parsed.headline !== 'string' || typeof parsed.reason_summary !== 'string' || !Array.isArray(parsed.remediation_steps) || !parsed.remediation_steps.every((step) => typeof step === 'string' && step.length > 0)) throw new Error('FinOps response failed strict validation');
+      return { headline: parsed.headline, reason_summary: parsed.reason_summary, policy_decision: params.decision, remediation_steps: parsed.remediation_steps };
     }
   } catch (err) {
-    console.warn('[FinOpsAI] OpenAI call failed or key inactive — using deterministic fallback:', err);
+    if (env.NODE_ENV !== 'test') throw new Error(`FinOps explanation generation failed: ${String(err)}`);
   }
 
   // Deterministic fallback

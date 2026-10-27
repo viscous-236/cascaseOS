@@ -14,10 +14,12 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react';
 import { toast } from 'sonner';
 import { cascadeApiClient, ApiError } from '../api/cascadeApiClient';
+import { formatMinorToUSD, formatVariancePct } from '../utils/formatters';
 import type {
   UnifiedProjectState,
   SystemHealthResponse,
@@ -35,6 +37,8 @@ interface CascadeStateContextType {
   health: SystemHealthResponse | null;
   isLoading: boolean;
   isRefreshing: boolean;
+  loadError: string | null;
+  refreshedAt: Date | null;
   activeScenario: 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C' | null;
   selectedTaskId: string | null;
   selectedReasonCode: string | null;
@@ -53,7 +57,7 @@ interface CascadeStateContextType {
 
   // Actions
   refreshState: (silent?: boolean, targetProjectId?: string) => Promise<void>;
-  fetchProjects: () => Promise<void>;
+  fetchProjects: () => Promise<ProjectSummary[]>;
   switchProject: (projectId: string) => Promise<void>;
   openNewProjectModal: () => void;
   closeNewProjectModal: () => void;
@@ -74,6 +78,14 @@ interface CascadeStateContextType {
   setIsAuditDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   setIsAgentChatOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   approvePlan: (approverActor: string, customNote?: string) => Promise<boolean>;
+  lastNotification: {
+    invoiceId: string | null;
+    minimumAmountDueMinor: number;
+    qrCodeBase64: string | null;
+    reminderSentAt: string | null;
+    recipientViewUrl: string | null;
+    nudgeMessage: string;
+  } | null;
   toggleTheme: () => void;
 }
 
@@ -84,6 +96,9 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
   const [health, setHealth] = useState<SystemHealthResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const requestSequence = useRef(0);
   const [activeScenario, setActiveScenario] = useState<
     'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C' | null
   >(null);
@@ -98,22 +113,25 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
   const [projectsList, setProjectsList] = useState<ProjectSummary[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => {
     try {
-      return localStorage.getItem('cascade_active_project_id') || 'proj_apex_clinic_01';
+      return localStorage.getItem('cascade_active_project_id') || '';
     } catch {
-      return 'proj_apex_clinic_01';
+      return '';
     }
   });
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState<boolean>(false);
+  const projectIdRef = useRef(activeProjectId);
+  projectIdRef.current = activeProjectId;
   const [isTaskFinancialsDrawerOpen, setIsTaskFinancialsDrawerOpen] = useState<boolean>(false);
   const [drawerTaskId, setDrawerTaskId] = useState<string | null>(null);
+  const [lastNotification, setLastNotification] = useState<CascadeStateContextType['lastNotification']>(null);
 
   // Theme state: default dark, persists in localStorage, syncs with document.documentElement
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
       const saved = localStorage.getItem('cascade_theme');
-      return saved === 'light' || saved === 'dark' ? saved : 'dark';
+      return saved === 'light' || saved === 'dark' ? saved : 'light';
     } catch {
-      return 'dark';
+      return 'light';
     }
   });
 
@@ -146,53 +164,67 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const fetchProjects = useCallback(async () => {
+  const fetchProjects = useCallback(async (): Promise<ProjectSummary[]> => {
     try {
       const res = await cascadeApiClient.getProjects();
       if (res.success && Array.isArray(res.projects)) {
         setProjectsList(res.projects);
+        return res.projects;
       }
     } catch (err) {
       console.warn('Failed to load projects list:', err);
+      setLoadError('Could not load projects. Check the server connection and try again.');
     }
+    return [];
   }, []);
 
   const refreshState = useCallback(async (silent = false, targetProjectId?: string) => {
-    const pId = targetProjectId || activeProjectId;
+    const pId = targetProjectId || projectIdRef.current;
+    const sequence = ++requestSequence.current;
     if (!silent) setIsRefreshing(true);
+    if (!pId) {
+      setIsLoading(false);
+      if (!silent) setIsRefreshing(false);
+      return;
+    }
     try {
       const s = await cascadeApiClient.getProjectState(pId);
+      if (sequence !== requestSequence.current) return;
       setState(s);
+      setLoadError(null);
+      setRefreshedAt(new Date());
 
       // Auto-locate latest proposed or active recovery plan
       const latestProposed = s.recoveryPlans?.find((p) => p.status === 'PROPOSED');
-      if (latestProposed) {
-        setActivePlan(latestProposed);
-      }
+      setActivePlan(latestProposed ?? s.recoveryPlans?.find((p) => p.status === 'APPROVED') ?? null);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404 && pId === 'proj_apex_clinic_01') {
-        // Project not yet bootstrapped, attempt quiet initial bootstrap
-        console.info('Project uninitialized, seeding sandbox project...');
-        await cascadeApiClient.bootstrapProject({ skipPayPal: true, skipChannel3: true });
-        const refreshed = await cascadeApiClient.getProjectState('proj_apex_clinic_01');
-        setState(refreshed);
-      } else {
-        toast.error('Failed to synchronize project state', {
-          description: String(err),
-        });
-      }
+      if (sequence !== requestSequence.current) return;
+      setLoadError('Could not synchronize this project. Retry to get the latest milestone and payment data.');
+      toast.error('Failed to synchronize project state', {
+        description: String(err),
+      });
     } finally {
-      if (!silent) setIsRefreshing(false);
-      setIsLoading(false);
+      if (sequence === requestSequence.current) {
+        if (!silent) setIsRefreshing(false);
+        setIsLoading(false);
+      }
     }
-  }, [activeProjectId]);
+  }, []);
 
   const switchProject = useCallback(
     async (newProjectId: string) => {
       if (newProjectId === activeProjectId) return;
       setIsRefreshing(true);
       setActiveProjectId(newProjectId);
+      projectIdRef.current = newProjectId;
+      setState(null);
       setSelectedTaskId(null);
+      setDrawerTaskId(null);
+      setIsTaskFinancialsDrawerOpen(false);
+      setIsApprovalModalOpen(false);
+      setSelectedReasonCode(null);
+      setActiveScenario(null);
+      setLastNotification(null);
       setActivePlan(null);
       try {
         localStorage.setItem('cascade_active_project_id', newProjectId);
@@ -201,9 +233,6 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
       }
       await refreshState(false, newProjectId);
       await fetchProjects();
-      toast.success('Switched active project', {
-        description: `Targeting project: ${newProjectId}`,
-      });
     },
     [activeProjectId, refreshState, fetchProjects]
   );
@@ -224,11 +253,20 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
   // Initial load
   useEffect(() => {
     let mounted = true;
-    const init = async () => {
-      await checkHealth();
-      await fetchProjects();
-      if (mounted) {
-        await refreshState();
+      const init = async () => {
+        void checkHealth();
+      const projects = await fetchProjects();
+      const savedProjectId = (() => {
+        try { return localStorage.getItem('cascade_active_project_id') || ''; } catch { return ''; }
+      })();
+      const targetProjectId = projects.find((project) => project.project_id === savedProjectId)?.project_id ?? projects[0]?.project_id ?? '';
+      if (targetProjectId) {
+        setActiveProjectId(targetProjectId);
+        projectIdRef.current = targetProjectId;
+        try { localStorage.setItem('cascade_active_project_id', targetProjectId); } catch { /* browser storage optional */ }
+        if (mounted) await refreshState(false, targetProjectId);
+      } else if (mounted) {
+        setIsLoading(false);
       }
     };
     init();
@@ -282,6 +320,12 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
             description: `${res.stats.tasks_count} phases built with ${res.stats.paypal_invoices_created} live PayPal invoices & ${res.stats.channel3_quotes_created} Channel3 audits.`,
           });
           setActiveProjectId(res.project.project_id);
+          projectIdRef.current = res.project.project_id;
+          setSelectedTaskId(null);
+          setSelectedReasonCode(null);
+          setActivePlan(null);
+          setActiveScenario(null);
+          setLastNotification(null);
           try {
             localStorage.setItem('cascade_active_project_id', res.project.project_id);
           } catch {
@@ -420,20 +464,22 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         if (scenarioId === 'SCENARIO_A' && result.plan) {
           setActivePlan(result.plan);
           setIsApprovalModalOpen(true);
-          toast.warning('Scenario A Triggered: $5,100 Exposure Detected', {
-            id: toastId,
-            description:
-              'Phase 2 overdue. 56 idle hours at risk. Phase 3 promoted to keep opening date on track.',
+           toast.warning(`Scenario A triggered: ${result.blastRadius ? formatMinorToUSD(result.blastRadius.total_exposure_minor) : 'recovery plan ready'} exposure`, {
+             id: toastId,
+             description: result.blastRadius
+               ? `${result.blastRadius.idle_crew_hours} idle hours at risk. A live reroute keeps the active project moving.`
+               : 'A live reroute keeps the active project moving.',
           });
         } else if (scenarioId === 'SCENARIO_B') {
           if (result.channel3Proposed?.plan) {
             setActivePlan(result.channel3Proposed.plan);
             setIsApprovalModalOpen(true);
           }
-          toast.info('Scenario B Triggered: Incumbent $490 Quote BLOCKED', {
-            id: toastId,
-            description:
-              'Price creep (+28.95%) blocked. Live Channel3 alternative discovered with verified savings.',
+           toast.info(`Scenario B triggered: ${result.incumbentBlocked ? formatVariancePct(result.incumbentBlocked.observed.variance_pct) : 'supplier'} defense`, {
+             id: toastId,
+             description: result.channel3Proposed
+               ? `Live Channel3 alternative found with ${formatMinorToUSD(result.channel3Proposed.quote.savings_vs_incumbent_minor)} observed savings.`
+               : 'Supplier policy evaluation completed for active project.',
           });
         } else if (scenarioId === 'SCENARIO_C') {
           toast.error('Scenario C Triggered: Adversarial Violation Hard BLOCKED', {
@@ -457,11 +503,6 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
 
   const selectTask = useCallback((taskId: string | null) => {
     setSelectedTaskId(taskId);
-    if (taskId) {
-      toast.info(`Task selected: ${taskId}`, {
-        duration: 1500,
-      });
-    }
   }, []);
 
   const selectReasonCode = useCallback((code: string | null) => {
@@ -495,6 +536,14 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
           customNudgeNote: customNote,
         });
 
+        setLastNotification({
+          invoiceId: res.invoiceId,
+          minimumAmountDueMinor: res.minimumAmountDueMinor,
+          qrCodeBase64: res.qrCodeBase64,
+          reminderSentAt: res.reminderSentAt,
+          recipientViewUrl: res.recipientViewUrl,
+          nudgeMessage: res.nudgeMessage,
+        });
         await refreshState(true);
         closeApprovalModal();
 
@@ -530,6 +579,8 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         health,
         isLoading,
         isRefreshing,
+        loadError,
+        refreshedAt,
         activeScenario,
         selectedTaskId,
         selectedReasonCode,
@@ -554,6 +605,7 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         updateTaskSchedule,
         addNewTaskPhase,
         provisionTaskFinancials,
+        lastNotification,
         checkHealth,
         bootstrapProject,
         triggerScenario,

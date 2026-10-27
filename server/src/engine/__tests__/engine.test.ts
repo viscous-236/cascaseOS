@@ -41,6 +41,7 @@ function makeTask(overrides: Partial<CascadeTask> & { task_id: string }): Cascad
     schedule_status: 'SCHEDULED',
     paypal_invoice_id: null,
     paypal_invoice_number: null,
+    paypal_invoice_view_url: null,
     paypal_invoice_status: 'DRAFT',
     invoice_total_minor: 0,
     materials_unlock_minor: 0,

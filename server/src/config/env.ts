@@ -70,7 +70,7 @@ const envSchema = z.object({
   CHANNEL3_API_BASE_URL: z
     .string()
     .url()
-    .default('https://api.trychannel3.com/v1'),
+    .default('https://api.trychannel3.com/v0'),
 
   // ─── LLM (Groq / OpenAI) ───────────────────────────────────────────────────
   OPENAI_API_KEY: z.string().optional(),

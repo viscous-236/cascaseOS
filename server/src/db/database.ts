@@ -107,6 +107,14 @@ export async function initDatabase(): Promise<void> {
   const schema = readFileSync(SCHEMA_PATH, 'utf-8');
   _db.exec(schema);
 
+  // Phase 10 migration for databases created before direct invoice links existed.
+  const taskColumns = _db
+    .prepare("PRAGMA table_info('tasks')")
+    .all() as Array<{ name: string }>;
+  if (!taskColumns.some((column) => column.name === 'paypal_invoice_view_url')) {
+    _db.exec('ALTER TABLE tasks ADD COLUMN paypal_invoice_view_url TEXT');
+  }
+
   // Verify PRAGMA settings applied by schema.sql
   const journalMode = (_db.pragma('journal_mode') as Array<{ journal_mode: string }>)[0]?.journal_mode;
   const foreignKeys = (_db.pragma('foreign_keys') as Array<{ foreign_keys: number }>)[0]?.foreign_keys;
@@ -222,8 +230,8 @@ export const TaskRepo = {
           task_id, project_id, version, name, start_date, end_date, duration_days,
           materials_in_warehouse, crew_assigned, daily_idle_burn_minor,
           sla_delay_penalty_minor, phase_hardware_budget_max_minor,
-          schedule_status, paypal_invoice_id, paypal_invoice_number,
-          paypal_invoice_status, invoice_total_minor, materials_unlock_minor,
+           schedule_status, paypal_invoice_id, paypal_invoice_number,
+           paypal_invoice_view_url, paypal_invoice_status, invoice_total_minor, materials_unlock_minor,
           deferred_labor_minor, client_name, client_email, qr_code_base64,
           last_nudge_message, last_nudge_sent_at, sku_search_query,
           required_quantity, incumbent_vendor_name, incumbent_unit_price_minor,
@@ -232,8 +240,8 @@ export const TaskRepo = {
           @task_id, @project_id, @version, @name, @start_date, @end_date, @duration_days,
           @materials_in_warehouse, @crew_assigned, @daily_idle_burn_minor,
           @sla_delay_penalty_minor, @phase_hardware_budget_max_minor,
-          @schedule_status, @paypal_invoice_id, @paypal_invoice_number,
-          @paypal_invoice_status, @invoice_total_minor, @materials_unlock_minor,
+           @schedule_status, @paypal_invoice_id, @paypal_invoice_number,
+           @paypal_invoice_view_url, @paypal_invoice_status, @invoice_total_minor, @materials_unlock_minor,
           @deferred_labor_minor, @client_name, @client_email, @qr_code_base64,
           @last_nudge_message, @last_nudge_sent_at, @sku_search_query,
           @required_quantity, @incumbent_vendor_name, @incumbent_unit_price_minor,
@@ -271,6 +279,7 @@ export const TaskRepo = {
     patch: {
       paypal_invoice_id?: string | null;
       paypal_invoice_number?: string | null;
+      paypal_invoice_view_url?: string | null;
       paypal_invoice_status?: CascadeTask['paypal_invoice_status'];
       qr_code_base64?: string | null;
       last_nudge_message?: string | null;
@@ -281,8 +290,9 @@ export const TaskRepo = {
       .prepare(
         `UPDATE tasks
          SET paypal_invoice_id      = COALESCE(@paypal_invoice_id, paypal_invoice_id),
-             paypal_invoice_number  = COALESCE(@paypal_invoice_number, paypal_invoice_number),
-             paypal_invoice_status  = COALESCE(@paypal_invoice_status, paypal_invoice_status),
+              paypal_invoice_number  = COALESCE(@paypal_invoice_number, paypal_invoice_number),
+              paypal_invoice_view_url = COALESCE(@paypal_invoice_view_url, paypal_invoice_view_url),
+              paypal_invoice_status  = COALESCE(@paypal_invoice_status, paypal_invoice_status),
              qr_code_base64         = COALESCE(@qr_code_base64, qr_code_base64),
              last_nudge_message     = COALESCE(@last_nudge_message, last_nudge_message),
              last_nudge_sent_at     = COALESCE(@last_nudge_sent_at, last_nudge_sent_at),
@@ -320,9 +330,10 @@ export const TaskRepo = {
           sla_delay_penalty_minor = @sla_delay_penalty_minor,
           phase_hardware_budget_max_minor = @phase_hardware_budget_max_minor,
           schedule_status = @schedule_status,
-          paypal_invoice_id = @paypal_invoice_id,
-          paypal_invoice_number = @paypal_invoice_number,
-          paypal_invoice_status = @paypal_invoice_status,
+           paypal_invoice_id = @paypal_invoice_id,
+           paypal_invoice_number = @paypal_invoice_number,
+           paypal_invoice_view_url = @paypal_invoice_view_url,
+           paypal_invoice_status = @paypal_invoice_status,
           invoice_total_minor = @invoice_total_minor,
           materials_unlock_minor = @materials_unlock_minor,
           deferred_labor_minor = @deferred_labor_minor,

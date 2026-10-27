@@ -28,6 +28,65 @@ export interface GenerateProjectBlueprintInput {
 
 let _openaiClient: OpenAI | null = null;
 
+const PROJECT_BLUEPRINT_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['project_name', 'currency', 'tasks', 'dependencies'],
+  properties: {
+    project_name: { type: 'string', minLength: 3 },
+    currency: { type: 'string', enum: ['USD'] },
+    tasks: {
+      type: 'array',
+      minItems: 4,
+      maxItems: 8,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'task_id', 'name', 'duration_days', 'materials_in_warehouse',
+          'crew_assigned', 'daily_idle_burn_minor', 'sla_delay_penalty_minor',
+          'phase_hardware_budget_max_minor', 'invoice_total_minor',
+          'materials_unlock_minor', 'deferred_labor_minor', 'sku_search_query',
+          'required_quantity', 'incumbent_vendor_name', 'incumbent_unit_price_minor',
+          'historical_unit_price_minor', 'max_allowed_variance_pct',
+        ],
+        properties: {
+          task_id: { type: 'string', minLength: 1 },
+          name: { type: 'string', minLength: 2 },
+          duration_days: { type: 'integer', minimum: 1, maximum: 30 },
+          materials_in_warehouse: { type: 'boolean' },
+          crew_assigned: { type: 'string', minLength: 2 },
+          daily_idle_burn_minor: { type: 'integer', minimum: 0 },
+          sla_delay_penalty_minor: { type: 'integer', minimum: 0 },
+          phase_hardware_budget_max_minor: { type: 'integer', minimum: 0 },
+          invoice_total_minor: { type: 'integer', minimum: 0 },
+          materials_unlock_minor: { type: 'integer', minimum: 0 },
+          deferred_labor_minor: { type: 'integer', minimum: 0 },
+          sku_search_query: { type: ['string', 'null'] },
+          required_quantity: { type: 'integer', minimum: 0 },
+          incumbent_vendor_name: { type: ['string', 'null'] },
+          incumbent_unit_price_minor: { type: ['integer', 'null'], minimum: 0 },
+          historical_unit_price_minor: { type: ['integer', 'null'], minimum: 0 },
+          max_allowed_variance_pct: { type: 'number', minimum: 0 },
+        },
+      },
+    },
+    dependencies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['from_task_id', 'to_task_id', 'lag_days'],
+        properties: {
+          from_task_id: { type: 'string', minLength: 1 },
+          to_task_id: { type: 'string', minLength: 1 },
+          lag_days: { type: 'integer', minimum: 0 },
+        },
+      },
+    },
+  },
+} as const;
+
 function getOpenAIClient(): OpenAI {
   if (!_openaiClient) {
     _openaiClient = new OpenAI({
@@ -84,7 +143,14 @@ User Specification:
     const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       model: env.OPENAI_MODEL || 'gpt-4o',
-      response_format: { type: 'json_object' },
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'cascade_project_blueprint',
+          strict: true,
+          schema: PROJECT_BLUEPRINT_JSON_SCHEMA,
+        },
+      },
       messages: [
         { role: 'system', content: systemInstructions },
         { role: 'user', content: userQuery },
@@ -102,6 +168,21 @@ User Specification:
 
     // Validate acyclic graph (SEC-101)
     const taskIds = validated.tasks.map((t) => t.task_id);
+    if (new Set(taskIds).size !== taskIds.length) {
+      throw new Error('AI blueprint contains duplicate task IDs');
+    }
+    const taskIdSet = new Set(taskIds);
+    if (validated.dependencies.some((dependency) => !taskIdSet.has(dependency.from_task_id) || !taskIdSet.has(dependency.to_task_id))) {
+      throw new Error('AI blueprint dependency references an unknown task');
+    }
+    for (const task of validated.tasks) {
+      if (task.materials_unlock_minor + task.deferred_labor_minor !== task.invoice_total_minor) {
+        throw new Error(`AI blueprint invoice split does not balance for ${task.task_id}`);
+      }
+      if ((task.sku_search_query === null) !== (task.required_quantity === 0)) {
+        throw new Error(`AI blueprint hardware fields are inconsistent for ${task.task_id}`);
+      }
+    }
     const dagCheck = validateAcyclicGraph(taskIds, validated.dependencies);
     if (!dagCheck.valid) {
       throw new Error(
@@ -109,212 +190,13 @@ User Specification:
       );
     }
 
-    // Ensure at least one promotable task has materials_in_warehouse (SEC-102)
-    const hasPromotableCandidate = validated.tasks.some(
-      (t) => t.materials_in_warehouse === true
-    );
-    if (!hasPromotableCandidate && validated.tasks[2]) {
-      validated.tasks[2].materials_in_warehouse = true;
+    // Require a warehouse-ready candidate. Never mutate model output after validation.
+    if (!validated.tasks.some((task, index) => index > 0 && task.materials_in_warehouse)) {
+      throw new Error('AI blueprint must contain a warehouse-ready task');
     }
 
     return validated;
   } catch (err) {
-    console.warn(
-      '⚠️ OpenAI structured generation failed or fell back. Synthesizing deterministic blueprint:',
-      err
-    );
-    return createDeterministicFallbackBlueprint(input);
+    throw new Error(`AI project blueprint generation failed: ${String(err)}`);
   }
-}
-
-/**
- * High-quality deterministic fallback blueprint generator for offline / test environments.
- */
-function createDeterministicFallbackBlueprint(
-  input: GenerateProjectBlueprintInput
-): AiGeneratedProjectBlueprint {
-  const p = input.prompt.toLowerCase();
-  const isAudioOrStudio = p.includes('studio') || p.includes('podcast') || p.includes('stream') || p.includes('audio');
-  const isRoboticsOrLab = p.includes('robot') || p.includes('lab') || p.includes('hardware') || p.includes('drone');
-
-  if (isRoboticsOrLab) {
-    return {
-      project_name: input.prompt.slice(0, 40) || 'Autonomous Robotics & Hardware Lab',
-      currency: 'USD',
-      tasks: [
-        {
-          task_id: 'phase_1_power_infrastructure',
-          name: 'Phase 1: High-Current Clean Power & Server Racks',
-          duration_days: 3,
-          materials_in_warehouse: false,
-          crew_assigned: 'Industrial Electricians',
-          daily_idle_burn_minor: 72000,
-          sla_delay_penalty_minor: 0,
-          phase_hardware_budget_max_minor: 180000,
-          invoice_total_minor: 320000,
-          materials_unlock_minor: 120000,
-          deferred_labor_minor: 200000,
-          sku_search_query: 'Zero U Switched Rack PDU 120V 20A',
-          required_quantity: 4,
-          incumbent_vendor_name: 'RackPower Inc',
-          incumbent_unit_price_minor: 38000,
-          historical_unit_price_minor: 30000,
-          max_allowed_variance_pct: 10.0,
-        },
-        {
-          task_id: 'phase_2_sensor_rigs',
-          name: 'Phase 2: High-Speed LiDAR & Optical Sensor Mounting',
-          duration_days: 3,
-          materials_in_warehouse: false,
-          crew_assigned: 'Robotics Integration Specialists',
-          daily_idle_burn_minor: 85000,
-          sla_delay_penalty_minor: 180000,
-          phase_hardware_budget_max_minor: 220000,
-          invoice_total_minor: 480000,
-          materials_unlock_minor: 175000,
-          deferred_labor_minor: 305000,
-          sku_search_query: '3D LiDAR Depth Sensor Optical Rig',
-          required_quantity: 4,
-          incumbent_vendor_name: 'ElectroOptics Direct',
-          incumbent_unit_price_minor: 55000,
-          historical_unit_price_minor: 42000,
-          max_allowed_variance_pct: 10.0,
-        },
-        {
-          task_id: 'phase_3_mesh_networking',
-          name: 'Phase 3: 10GbE Fiber Uplink & Low-Latency Mesh',
-          duration_days: 2,
-          materials_in_warehouse: true, // Candidate for promotion!
-          crew_assigned: 'Network Architecture Crew',
-          daily_idle_burn_minor: 65000,
-          sla_delay_penalty_minor: 0,
-          phase_hardware_budget_max_minor: 140000,
-          invoice_total_minor: 290000,
-          materials_unlock_minor: 110000,
-          deferred_labor_minor: 180000,
-          sku_search_query: 'Managed 10GbE SFP+ 24 Port Switch',
-          required_quantity: 2,
-          incumbent_vendor_name: 'OpticMesh Distributors',
-          incumbent_unit_price_minor: 65000,
-          historical_unit_price_minor: 55000,
-          max_allowed_variance_pct: 10.0,
-        },
-        {
-          task_id: 'phase_4_safety_enclosures',
-          name: 'Phase 4: Safety Interlocks & Teleoperation Station',
-          duration_days: 2,
-          materials_in_warehouse: false,
-          crew_assigned: 'Industrial Safety Engineers',
-          daily_idle_burn_minor: 60000,
-          sla_delay_penalty_minor: 0,
-          phase_hardware_budget_max_minor: 120000,
-          invoice_total_minor: 240000,
-          materials_unlock_minor: 90000,
-          deferred_labor_minor: 150000,
-          sku_search_query: 'Emergency Stop Machine Interlock Station',
-          required_quantity: 4,
-          incumbent_vendor_name: 'SafeIndustrial Supply',
-          incumbent_unit_price_minor: 30000,
-          historical_unit_price_minor: 25000,
-          max_allowed_variance_pct: 10.0,
-        },
-      ],
-      dependencies: [
-        { from_task_id: 'phase_1_power_infrastructure', to_task_id: 'phase_2_sensor_rigs', lag_days: 0 },
-        { from_task_id: 'phase_1_power_infrastructure', to_task_id: 'phase_3_mesh_networking', lag_days: 0 },
-        { from_task_id: 'phase_2_sensor_rigs', to_task_id: 'phase_4_safety_enclosures', lag_days: 0 },
-        { from_task_id: 'phase_3_mesh_networking', to_task_id: 'phase_4_safety_enclosures', lag_days: 0 },
-      ],
-    };
-  }
-
-  // Default: AV / Creator / Diagnostic Studio
-  return {
-    project_name: input.prompt.slice(0, 40) || 'Custom High-Performance Studio Buildout',
-    currency: 'USD',
-    tasks: [
-      {
-        task_id: 'phase_1_electrical_framing',
-        name: 'Phase 1: Power Infrastructure & Wall Framing',
-        duration_days: 2,
-        materials_in_warehouse: false,
-        crew_assigned: 'Master Electricians',
-        daily_idle_burn_minor: 60000,
-        sla_delay_penalty_minor: 0,
-        phase_hardware_budget_max_minor: 120000,
-        invoice_total_minor: 300000,
-        materials_unlock_minor: 100000,
-        deferred_labor_minor: 200000,
-        sku_search_query: 'Commercial Grade 20A Surge Suppressor PDU',
-        required_quantity: 4,
-        incumbent_vendor_name: 'Metro Electric',
-        incumbent_unit_price_minor: 28000,
-        historical_unit_price_minor: 24000,
-        max_allowed_variance_pct: 10.0,
-      },
-      {
-        task_id: 'phase_2_displays_rigging',
-        name: 'Phase 2: 4K Production Displays & Mounts',
-        duration_days: 3,
-        materials_in_warehouse: false,
-        crew_assigned: 'Display Mount Specialists',
-        daily_idle_burn_minor: 68000,
-        sla_delay_penalty_minor: 144000,
-        phase_hardware_budget_max_minor: 160000,
-        invoice_total_minor: 450000,
-        materials_unlock_minor: 139600,
-        deferred_labor_minor: 310400,
-        sku_search_query: '32 inch 4K UHD IPS Monitor Ergonomic Stand',
-        required_quantity: 4,
-        incumbent_vendor_name: 'Incumbent AV Supply',
-        incumbent_unit_price_minor: 49000,
-        historical_unit_price_minor: 38000,
-        max_allowed_variance_pct: 10.0,
-      },
-      {
-        task_id: 'phase_3_acoustics_networking',
-        name: 'Phase 3: Acoustic Panels & Managed Switches',
-        duration_days: 2,
-        materials_in_warehouse: true, // Candidate for promotion!
-        crew_assigned: 'Studio Tech Crew',
-        daily_idle_burn_minor: 55000,
-        sla_delay_penalty_minor: 0,
-        phase_hardware_budget_max_minor: 130000,
-        invoice_total_minor: 280000,
-        materials_unlock_minor: 95000,
-        deferred_labor_minor: 185000,
-        sku_search_query: 'Studio Acoustic Foam Panels 24 Pack',
-        required_quantity: 2,
-        incumbent_vendor_name: 'AudioPro Supply',
-        incumbent_unit_price_minor: 42000,
-        historical_unit_price_minor: 36000,
-        max_allowed_variance_pct: 10.0,
-      },
-      {
-        task_id: 'phase_4_final_calibration',
-        name: 'Phase 4: Color Grading & System Commissioning',
-        duration_days: 2,
-        materials_in_warehouse: false,
-        crew_assigned: 'Lead Systems Engineer',
-        daily_idle_burn_minor: 75000,
-        sla_delay_penalty_minor: 0,
-        phase_hardware_budget_max_minor: 100000,
-        invoice_total_minor: 220000,
-        materials_unlock_minor: 80000,
-        deferred_labor_minor: 140000,
-        sku_search_query: 'Display Colorimeter Calibration Tool',
-        required_quantity: 1,
-        incumbent_vendor_name: 'ColorTech Supply',
-        incumbent_unit_price_minor: 32000,
-        historical_unit_price_minor: 28000,
-        max_allowed_variance_pct: 10.0,
-      },
-    ],
-    dependencies: [
-      { from_task_id: 'phase_1_electrical_framing', to_task_id: 'phase_2_displays_rigging', lag_days: 0 },
-      { from_task_id: 'phase_1_electrical_framing', to_task_id: 'phase_3_acoustics_networking', lag_days: 0 },
-      { from_task_id: 'phase_2_displays_rigging', to_task_id: 'phase_4_final_calibration', lag_days: 0 },
-      { from_task_id: 'phase_3_acoustics_networking', to_task_id: 'phase_4_final_calibration', lag_days: 0 },
-    ],
-  };
 }

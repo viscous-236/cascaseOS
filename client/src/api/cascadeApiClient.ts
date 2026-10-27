@@ -26,7 +26,9 @@ export class ApiError extends Error {
     public readonly errorData: any,
     message?: string
   ) {
-    super(message || (typeof errorData?.error === 'string' ? errorData.error : `HTTP ${status}`));
+    super(message || (typeof errorData?.message === 'string'
+      ? `${typeof errorData?.error === 'string' ? errorData.error : `HTTP ${status}`}: ${errorData.message}`
+      : typeof errorData?.error === 'string' ? errorData.error : `HTTP ${status}`));
     this.name = 'ApiError';
   }
 }
@@ -80,8 +82,13 @@ export const cascadeApiClient = {
   },
 
   /** Retrieves the unified project state tree */
-  async getProjectState(projectId = 'proj_apex_clinic_01'): Promise<UnifiedProjectState> {
-    return request<UnifiedProjectState>(`/projects/${encodeURIComponent(projectId)}/state`);
+  async getProjectState(projectId: string): Promise<UnifiedProjectState> {
+    const response = await request<UnifiedProjectState & { activeRecoveryPlan?: CascadeRecoveryPlan | null }>(`/projects/${encodeURIComponent(projectId)}/state`);
+    return {
+      ...response,
+      recoveryPlans: response.recoveryPlans ?? (response.activeRecoveryPlan ? [response.activeRecoveryPlan] : []),
+      userApprovals: response.userApprovals ?? [],
+    };
   },
 
   /** Fetches all persisted projects with summary KPIs (REQ-101) */
@@ -212,8 +219,12 @@ export const cascadeApiClient = {
     success: boolean;
     plan: CascadeRecoveryPlan;
     approval: any;
-    updatedInvoice: any;
+    invoiceId: string | null;
+    minimumAmountDueMinor: number;
     qrCodeBase64: string | null;
+    reminderSentAt: string | null;
+    recipientViewUrl: string | null;
+    nudgeMessage: string;
     tasks: any[];
   }> {
     return request(`/recovery-plans/${planId}/approve-schedule-and-split`, {

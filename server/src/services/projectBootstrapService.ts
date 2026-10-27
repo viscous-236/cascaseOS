@@ -15,6 +15,7 @@ import { env } from '../config/env.js';
 import {
   createDraftInvoice,
   sendInvoice,
+  getInvoice,
   generateInvoiceQrCode,
 } from './paypalInvoicingService.js';
 import { searchAndAuditSupplierProducts } from './channel3Service.js';
@@ -63,10 +64,12 @@ export const CANONICAL_DEPENDENCIES: Array<Omit<TaskDependency, 'project_id'>> =
 
 export function getCanonicalTasks(
   phase2InvoiceId: string | null = null,
-  phase2InvoiceNumber: string | null = 'INV-002',
+  phase2InvoiceNumber: string | null = null,
   phase2QrCode: string | null = null,
+  phase2InvoiceViewUrl: string | null = null,
   phase3InvoiceId: string | null = null,
-  phase3InvoiceNumber: string | null = 'INV-003'
+  phase3InvoiceNumber: string | null = null,
+  phase3InvoiceViewUrl: string | null = null,
 ): CascadeTask[] {
   return [
     {
@@ -83,8 +86,9 @@ export function getCanonicalTasks(
       sla_delay_penalty_minor: 0,
       phase_hardware_budget_max_minor: 0,
       schedule_status: 'COMPLETED',
-      paypal_invoice_id: 'INV2-PHASE-1-PAID',
-      paypal_invoice_number: 'INV-001',
+      paypal_invoice_id: null,
+      paypal_invoice_number: null,
+      paypal_invoice_view_url: null,
       paypal_invoice_status: 'PAID',
       invoice_total_minor: 320000,
       materials_unlock_minor: 320000,
@@ -115,8 +119,9 @@ export function getCanonicalTasks(
       sla_delay_penalty_minor: 144000,
       phase_hardware_budget_max_minor: 160000,
       schedule_status: 'PAYMENT_BLOCKED',
-      paypal_invoice_id: phase2InvoiceId ?? 'INV2-PHASE-2-SANDBOX',
-      paypal_invoice_number: phase2InvoiceNumber ?? 'INV-002',
+       paypal_invoice_id: phase2InvoiceId,
+        paypal_invoice_number: phase2InvoiceNumber,
+        paypal_invoice_view_url: phase2InvoiceViewUrl,
       paypal_invoice_status: 'OVERDUE',
       invoice_total_minor: 450000,
       materials_unlock_minor: 139600,
@@ -147,8 +152,9 @@ export function getCanonicalTasks(
       sla_delay_penalty_minor: 0,
       phase_hardware_budget_max_minor: 0,
       schedule_status: 'READY_TO_PROMOTE',
-      paypal_invoice_id: phase3InvoiceId ?? 'INV2-PHASE-3-SANDBOX',
-      paypal_invoice_number: phase3InvoiceNumber ?? 'INV-003',
+       paypal_invoice_id: phase3InvoiceId,
+        paypal_invoice_number: phase3InvoiceNumber,
+        paypal_invoice_view_url: phase3InvoiceViewUrl,
       paypal_invoice_status: 'PAID',
       invoice_total_minor: 280000,
       materials_unlock_minor: 280000,
@@ -181,6 +187,7 @@ export function getCanonicalTasks(
       schedule_status: 'BLOCKED_BY_DEPENDENCY',
       paypal_invoice_id: null,
       paypal_invoice_number: null,
+      paypal_invoice_view_url: null,
       paypal_invoice_status: 'DRAFT',
       invoice_total_minor: 180000,
       materials_unlock_minor: 0,
@@ -213,6 +220,7 @@ export function getCanonicalTasks(
       schedule_status: 'SCHEDULED',
       paypal_invoice_id: null,
       paypal_invoice_number: null,
+      paypal_invoice_view_url: null,
       paypal_invoice_status: 'DRAFT',
       invoice_total_minor: 150000,
       materials_unlock_minor: 150000,
@@ -245,6 +253,7 @@ export function getCanonicalTasks(
       schedule_status: 'SCHEDULED',
       paypal_invoice_id: null,
       paypal_invoice_number: null,
+      paypal_invoice_view_url: null,
       paypal_invoice_status: 'DRAFT',
       invoice_total_minor: 120000,
       materials_unlock_minor: 0,
@@ -306,8 +315,10 @@ export async function bootstrapApexClinicProject(
   let phase2InvoiceId: string | null = null;
   let phase2InvoiceNumber: string | null = 'INV-002';
   let phase2QrCode: string | null = null;
+  let phase2InvoiceViewUrl: string | null = null;
   let phase3InvoiceId: string | null = null;
   let phase3InvoiceNumber: string | null = 'INV-003';
+  let phase3InvoiceViewUrl: string | null = null;
 
   // 1. Create Live PayPal Sandbox Invoices unless skipped
   if (!options.skipPayPal) {
@@ -331,7 +342,7 @@ export async function bootstrapApexClinicProject(
         ],
       });
       phase2InvoiceId = inv2.id;
-      phase2InvoiceNumber = inv2.detail?.invoice_number || 'INV-002';
+      phase2InvoiceNumber = inv2.detail?.invoice_number ?? null;
 
       // Send to advance from DRAFT to SENT/UNPAID (RISK-002)
       await sendInvoice(phase2InvoiceId);
@@ -339,10 +350,12 @@ export async function bootstrapApexClinicProject(
       // Generate live QR code for Phase 2 invoice
       const qrRes = await generateInvoiceQrCode(phase2InvoiceId);
       phase2QrCode = qrRes.qr_code_base64;
+      const sentInvoice = await getInvoice(phase2InvoiceId);
+      phase2InvoiceViewUrl = sentInvoice.detail.metadata?.recipient_view_url ?? null;
+      if (!phase2InvoiceViewUrl) throw new Error(`PayPal invoice ${phase2InvoiceId} missing recipient_view_url`);
       console.log(`[Bootstrap] Phase 2 PayPal invoice live: ${phase2InvoiceId} (${phase2InvoiceNumber})`);
     } catch (err) {
-      console.warn('[Bootstrap] Live PayPal Phase 2 invoice creation error (using sandbox fallback):', err);
-      phase2InvoiceId = `INV2-FALLBACK-${Date.now().toString().slice(-6)}`;
+      throw new Error(`Live PayPal Phase 2 invoice provisioning failed: ${String(err)}`);
     }
 
     try {
@@ -365,12 +378,14 @@ export async function bootstrapApexClinicProject(
         ],
       });
       phase3InvoiceId = inv3.id;
-      phase3InvoiceNumber = inv3.detail?.invoice_number || 'INV-003';
+      phase3InvoiceNumber = inv3.detail?.invoice_number ?? null;
       await sendInvoice(phase3InvoiceId);
+      const sentInvoice = await getInvoice(phase3InvoiceId);
+      phase3InvoiceViewUrl = sentInvoice.detail.metadata?.recipient_view_url ?? null;
+      if (!phase3InvoiceViewUrl) throw new Error(`PayPal invoice ${phase3InvoiceId} missing recipient_view_url`);
       console.log(`[Bootstrap] Phase 3 PayPal invoice live: ${phase3InvoiceId} (${phase3InvoiceNumber})`);
     } catch (err) {
-      console.warn('[Bootstrap] Live PayPal Phase 3 invoice creation error (using sandbox fallback):', err);
-      phase3InvoiceId = `INV3-FALLBACK-${Date.now().toString().slice(-6)}`;
+      throw new Error(`Live PayPal Phase 3 invoice provisioning failed: ${String(err)}`);
     }
   }
 
@@ -379,8 +394,10 @@ export async function bootstrapApexClinicProject(
     phase2InvoiceId,
     phase2InvoiceNumber,
     phase2QrCode,
+    phase2InvoiceViewUrl,
     phase3InvoiceId,
-    phase3InvoiceNumber
+    phase3InvoiceNumber,
+    phase3InvoiceViewUrl
   );
 
   const insertedData = withTransaction(() => {
@@ -483,17 +500,13 @@ export async function bootstrapApexClinicProject(
   // 3. Query Channel3 for Phase 2 Monitors
   let quotes = insertedData.quotes;
   if (!options.skipChannel3) {
-    try {
-      console.log('[Bootstrap] Querying Channel3 Product Graph for Phase 2 replacement displays...');
-      const phase2Task = TaskRepo.findById('task_phase_2_displays');
-      if (phase2Task) {
-        const channel3Quotes = await searchAndAuditSupplierProducts(phase2Task);
-        console.log(`[Bootstrap] Retrieved and audited ${channel3Quotes.length} quotes from Channel3`);
-        quotes = [...quotes, ...channel3Quotes];
-      }
-    } catch (err) {
-      console.warn('[Bootstrap] Channel3 search failed during bootstrap (retaining incumbent quote):', err);
-    }
+    console.log('[Bootstrap] Querying Channel3 Product Graph for Phase 2 replacement displays...');
+    const phase2Task = TaskRepo.findByProject(APEX_PROJECT_ID)
+      .find((task) => Boolean(task.sku_search_query) && task.required_quantity > 0);
+    if (!phase2Task) throw new Error('Bootstrap hardware task missing');
+    const channel3Quotes = await searchAndAuditSupplierProducts(phase2Task);
+    console.log(`[Bootstrap] Retrieved and audited ${channel3Quotes.length} quotes from Channel3`);
+    quotes = [...quotes, ...channel3Quotes];
   }
 
   return {

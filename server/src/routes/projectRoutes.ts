@@ -48,8 +48,10 @@ import {
 import {
   createDraftInvoice,
   sendInvoice,
+  getInvoice,
   generateInvoiceQrCode,
 } from '../services/paypalInvoicingService.js';
+import { computeStateFingerprint } from '../utils/moneyAndHash.js';
 import type {
   TaskDependency,
   SupplierQuote,
@@ -312,7 +314,11 @@ router.post('/projects/:projectId/tasks', async (req: Request, res: Response): P
   }
 
   const data = validation.data;
-  const taskId = `task_${Date.now()}_${randomUUID().slice(0, 4)}`;
+  const taskId = data.task_id || `task_${Date.now()}_${randomUUID().slice(0, 4)}`;
+  if (TaskRepo.findById(taskId)) {
+    res.status(409).json({ error: `Task '${taskId}' already exists` });
+    return;
+  }
   const duration = data.duration_days || 2;
   const startDate = data.start_date || new Date().toISOString().slice(0, 10);
   const endDate = data.end_date || addDays(startDate, duration - 1);
@@ -333,12 +339,13 @@ router.post('/projects/:projectId/tasks', async (req: Request, res: Response): P
     schedule_status: data.schedule_status || 'SCHEDULED',
     paypal_invoice_id: null,
     paypal_invoice_number: null,
+    paypal_invoice_view_url: null,
     paypal_invoice_status: data.paypal_invoice_status || 'DRAFT',
     invoice_total_minor: data.invoice_total_minor ?? 250000,
     materials_unlock_minor: data.materials_unlock_minor ?? Math.floor((data.invoice_total_minor ?? 250000) * 0.4),
     deferred_labor_minor: data.deferred_labor_minor ?? Math.floor((data.invoice_total_minor ?? 250000) * 0.6),
-    client_name: 'Client Billing Contact',
-    client_email: env.PAYPAL_SANDBOX_BUYER_EMAIL,
+    client_name: TaskRepo.findByProject(projectId)[0]?.client_name || 'Client Billing Contact',
+    client_email: TaskRepo.findByProject(projectId)[0]?.client_email || env.PAYPAL_SANDBOX_BUYER_EMAIL,
     qr_code_base64: null,
     last_nudge_message: null,
     last_nudge_sent_at: null,
@@ -372,14 +379,23 @@ router.post('/projects/:projectId/tasks', async (req: Request, res: Response): P
 
   // Provision PayPal & Channel3 if requested
   if (data.create_live_paypal_invoice && newTask.invoice_total_minor > 0) {
-    try {
-      const inv = await createDraftInvoice({
-        requestId: `cascade-task-${taskId}-${Date.now()}`,
+    const requestId = computeStateFingerprint({
+      projectId,
+      blockedTaskId: taskId,
+      promotedTaskId: taskId,
+      invoiceId: `${projectId}:${taskId}`,
+      unlockAmountMinor: newTask.materials_unlock_minor,
+      channel3ProductId: newTask.sku_search_query || taskId,
+      supplierTotalMinor: newTask.invoice_total_minor,
+      currency: project.currency,
+    }).replace(':', '-');
+    const inv = await createDraftInvoice({
+        requestId,
         invoicerBusinessName: 'CascadeOS Commercial Fitouts',
         invoicerEmail: env.PAYPAL_SANDBOX_MERCHANT_EMAIL,
         recipientEmail: newTask.client_email,
         memo: `${newTask.name} Milestone Invoice`,
-        currency: 'USD',
+        currency: project.currency,
         dueDate: newTask.end_date,
         items: [
           {
@@ -388,31 +404,32 @@ router.post('/projects/:projectId/tasks', async (req: Request, res: Response): P
             unitPriceMinor: newTask.invoice_total_minor,
           },
         ],
-      });
-      await sendInvoice(inv.id);
-      let qrBase64: string | null = null;
-      try {
-        const qrRes = await generateInvoiceQrCode(inv.id);
-        qrBase64 = qrRes.qr_code_base64;
-      } catch {}
+    });
+    await sendInvoice(inv.id);
+    const sentInvoice = await getInvoice(inv.id);
+    const recipientViewUrl = sentInvoice.detail.metadata?.recipient_view_url ?? null;
+    if (!recipientViewUrl) {
+      res.status(502).json({ error: `PayPal invoice ${inv.id} missing recipient_view_url` });
+      return;
+    }
+    let qrBase64: string | null = null;
+    try {
+      qrBase64 = (await generateInvoiceQrCode(inv.id)).qr_code_base64;
+    } catch (err) {
+      console.warn(`[ProjectRoutes] QR generation unavailable for ${taskId}: ${String(err)}`);
+    }
 
-      TaskRepo.updateInvoice(taskId, {
+    TaskRepo.updateInvoice(taskId, {
         paypal_invoice_id: inv.id,
-        paypal_invoice_number: inv.detail?.invoice_number || `INV-${taskId}`,
+        paypal_invoice_number: sentInvoice.detail.invoice_number || `INV-${taskId}`,
+        paypal_invoice_view_url: recipientViewUrl,
         paypal_invoice_status: 'SENT',
         qr_code_base64: qrBase64,
       });
-    } catch (err) {
-      console.warn(`[ProjectRoutes] PayPal invoice creation skipped for ${taskId}:`, err);
-    }
   }
 
   if (data.run_live_channel3_audit && newTask.sku_search_query && newTask.required_quantity > 0) {
-    try {
-      await searchAndAuditSupplierProducts(newTask, { forceRefresh: true });
-    } catch (err) {
-      console.warn(`[ProjectRoutes] Channel3 audit skipped for ${taskId}:`, err);
-    }
+    await searchAndAuditSupplierProducts(newTask, { forceRefresh: true });
   }
 
   const finalTask = TaskRepo.findById(taskId);
@@ -577,7 +594,11 @@ router.post('/projects/:projectId/dependencies', (req: Request, res: Response): 
       );
   });
 
-  res.status(201).json({ success: true, dependency: newDep });
+  res.status(201).json({
+    success: true,
+    dependency: newDep,
+    topologicalOrder: cycleCheck.topologicalOrder,
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -588,8 +609,40 @@ router.delete('/projects/:projectId/dependencies/:dependencyId', (req: Request, 
   const projectId = String(req.params.projectId);
   const dependencyId = String(req.params.dependencyId);
   try {
-    DependencyRepo.deleteById(dependencyId);
-    res.status(200).json({ success: true, message: `Dependency '${dependencyId}' removed` });
+    const dependency = DependencyRepo.findByProject(projectId).find((item) => item.dependency_id === dependencyId);
+    if (!dependency) {
+      res.status(404).json({ error: `Dependency '${dependencyId}' not found in project '${projectId}'` });
+      return;
+    }
+    withTransaction(() => {
+      DependencyRepo.deleteById(dependencyId);
+      getDb()
+        .prepare(
+          `INSERT INTO audit_events (
+            event_id, project_id, task_id, event_type, decision, reason_codes_json,
+            state_fingerprint, summary, payload_json, created_at
+          ) VALUES (?, ?, ?, 'DEPENDENCY_DELETED', 'ALLOW', '[]', ?, ?, ?, ?)`
+        )
+        .run(
+          randomUUID(),
+          projectId,
+          dependency.to_task_id,
+          computeStateFingerprint({
+            projectId,
+            blockedTaskId: dependency.from_task_id,
+            promotedTaskId: dependency.to_task_id,
+            invoiceId: dependencyId,
+            unlockAmountMinor: 0,
+            channel3ProductId: dependencyId,
+            supplierTotalMinor: 0,
+            currency: ProjectRepo.findById(projectId)?.currency || 'USD',
+          }),
+          `Finish-to-start dependency removed: ${dependency.from_task_id} -> ${dependency.to_task_id}`,
+          JSON.stringify({ dependencyId }),
+          new Date().toISOString(),
+        );
+    });
+    res.status(200).json({ success: true, deleted: dependencyId });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

@@ -15,7 +15,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { getDb, TaskRepo, withTransaction } from '../db/database.js';
+import { getDb, ProjectRepo, TaskRepo, withTransaction } from '../db/database.js';
 import {
   getInvoice,
   updateInvoiceForPartialMaterialsUnlock,
@@ -32,6 +32,7 @@ import {
   capturePayPalOrderSchema,
 } from '../schemas/apiSchemas.js';
 import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
+import { computeStateFingerprint, minorUnitsToDisplayString } from '../utils/moneyAndHash.js';
 import type {
   CascadeRecoveryPlan,
   SupplierQuote,
@@ -74,8 +75,25 @@ router.post(
       return;
     }
 
+    const fingerprintTask = TaskRepo.findById(plan.blocked_task_id);
+    const fingerprintQuote = db
+      .prepare<[string], SupplierQuote>('SELECT * FROM supplier_quotes WHERE quote_id = ?')
+      .get(plan.selected_quote_id);
+    const currentFingerprint = fingerprintTask && fingerprintQuote
+      ? computeStateFingerprint({
+          projectId: plan.project_id,
+          blockedTaskId: plan.blocked_task_id,
+          promotedTaskId: plan.promoted_task_id,
+          invoiceId: fingerprintTask.paypal_invoice_id ?? `${plan.project_id}:${plan.blocked_task_id}`,
+          unlockAmountMinor: plan.immediate_unlock_minor,
+          channel3ProductId: fingerprintQuote.external_product_id,
+          supplierTotalMinor: fingerprintQuote.total_minor,
+          currency: fingerprintQuote.currency,
+        })
+      : null;
+
     // 2. Cryptographic Fingerprint Verification (REQ-008, PAT-002)
-    if (plan.state_fingerprint !== approvedFingerprint) {
+    if (!currentFingerprint || plan.state_fingerprint !== currentFingerprint || currentFingerprint !== approvedFingerprint) {
       db.prepare(
         `INSERT INTO audit_events (
           event_id, project_id, task_id, plan_id, event_type, decision,
@@ -89,7 +107,7 @@ router.post(
         planId,
         approvedFingerprint,
         'Approval attempt rejected: State fingerprint does not match canonical proposal',
-        JSON.stringify({ expected: plan.state_fingerprint, received: approvedFingerprint }),
+        JSON.stringify({ expected: currentFingerprint ?? plan.state_fingerprint, received: approvedFingerprint }),
         new Date().toISOString()
       );
 
@@ -111,23 +129,31 @@ router.post(
 
     // 4. Live PayPal Sandbox Operations (REQ-009)
     let qrCodeBase64: string | null = blockedTask.qr_code_base64;
+    let recipientViewUrl: string | null = blockedTask.paypal_invoice_view_url;
+    let reminderSentAt: string | null = null;
     const paypalInvoiceId = blockedTask.paypal_invoice_id;
 
-    const isPlaceholderInvoice = !paypalInvoiceId ||
-      paypalInvoiceId.startsWith('INV2-PHASE-') ||
-      paypalInvoiceId.startsWith('INV2-FALLBACK-') ||
-      paypalInvoiceId.startsWith('INV2-MOCK-');
+    if (paypalInvoiceId && /(?:FALLBACK|MOCK)/i.test(paypalInvoiceId)) {
+      res.status(409).json({
+        error: 'Stale placeholder PayPal invoice cannot be used',
+        invoiceId: paypalInvoiceId,
+        reason: 'Reset or re-bootstrap project with live PayPal Sandbox provisioning.',
+      });
+      return;
+    }
 
-    if (paypalInvoiceId && !isPlaceholderInvoice) {
+    if (paypalInvoiceId) {
+      let paypalOperation = 'getInvoice';
       try {
         console.log(`[Recovery] Updating PayPal Sandbox invoice ${paypalInvoiceId} for materials unlock...`);
         const currentInv = await getInvoice(paypalInvoiceId);
 
         const note =
           customNudgeNote ||
-          `CascadeOS agile milestone split: Dr. Vance, pay the materials portion of $${(plan.immediate_unlock_minor / 100).toFixed(2)} to release 4K diagnostic displays. Labor balance remains due on installation.`;
+          `CascadeOS agile milestone split: pay the materials portion of ${minorUnitsToDisplayString(plan.immediate_unlock_minor, 'USD')} to release critical project hardware. Labor balance remains due on installation.`;
 
         // Update PayPal Sandbox invoice to enable partial payment with materials minimum
+        paypalOperation = 'updateInvoiceForPartialMaterialsUnlock';
         await updateInvoiceForPartialMaterialsUnlock(
           paypalInvoiceId,
           currentInv,
@@ -137,26 +163,32 @@ router.post(
         );
 
         // Generate live PayPal QR Code
+        paypalOperation = 'generateInvoiceQrCode';
         const qrRes = await generateInvoiceQrCode(paypalInvoiceId);
         qrCodeBase64 = qrRes.qr_code_base64;
 
         // Send warm Nudge-Bot reminder
+        paypalOperation = 'sendInvoiceReminder';
         await sendInvoiceReminder(
           paypalInvoiceId,
           `Milestone Update: Keeping ${blockedTask.name} on schedule with partial hardware unlock`,
           note
         );
+        reminderSentAt = new Date().toISOString();
+        paypalOperation = 'getInvoice.recipient_view_url';
+        const refreshedInvoice = await getInvoice(paypalInvoiceId);
+        recipientViewUrl = refreshedInvoice.detail.metadata?.recipient_view_url ?? recipientViewUrl;
+        if (!recipientViewUrl) throw new Error(`PayPal invoice ${paypalInvoiceId} missing recipient_view_url`);
 
         console.log(`[Recovery] PayPal invoice updated, QR generated, and reminder sent successfully.`);
-      } catch (err: any) {
-        if (err?.message?.includes('403') || err?.message?.includes('NOT_AUTHORIZED')) {
-          console.warn('[Recovery] PayPal Invoicing API permission not toggled in developer portal (Orders v2 active). Continuing with SQLite state update.');
-        } else {
-          console.warn('[Recovery] PayPal live invoice update warning (continuing SQLite execution):', err);
-        }
+      } catch (err) {
+        res.status(502).json({
+          error: 'PayPal invoice split notification failed',
+          operation: paypalOperation,
+          message: String(err),
+        });
+        return;
       }
-    } else if (isPlaceholderInvoice) {
-      console.log(`[Recovery] Demo invoice ${paypalInvoiceId} detected — executing deterministic SQLite materials unlock & schedule reroute.`);
     }
 
     // 5. Atomic SQLite State Update & Audit Logging (PAT-001)
@@ -166,7 +198,7 @@ router.post(
       db.prepare(
         `INSERT INTO user_approvals (approval_id, plan_id, approved_fingerprint, approver_actor, approved_at)
          VALUES (?, ?, ?, ?, ?)`
-      ).run(randomUUID(), planId, approvedFingerprint, approverActor, now);
+      ).run(randomUUID(), planId, currentFingerprint, approverActor, now);
 
       // Update recovery plan status to APPROVED
       db.prepare(
@@ -188,14 +220,21 @@ router.post(
         ).run(plan.new_blocked_start_date, plan.blocked_task_id);
       }
 
-      // Update blocked task with QR code and nudge timestamp
-      db.prepare(
-        `UPDATE tasks
-         SET qr_code_base64 = ?,
-             last_nudge_sent_at = ?,
-             last_nudge_message = ?
-         WHERE task_id = ?`
-      ).run(qrCodeBase64, now, customNudgeNote ?? plan.nudge_draft_text, plan.blocked_task_id);
+       // Update blocked task with QR code, direct payment link, and nudge timestamp
+       db.prepare(
+         `UPDATE tasks
+          SET qr_code_base64 = ?,
+              paypal_invoice_view_url = ?,
+              last_nudge_sent_at = ?,
+              last_nudge_message = ?
+          WHERE task_id = ?`
+       ).run(
+         qrCodeBase64,
+         recipientViewUrl,
+         reminderSentAt ?? now,
+         customNudgeNote ?? plan.nudge_draft_text,
+         plan.blocked_task_id,
+       );
 
       // Record transaction
       db.prepare(
@@ -226,10 +265,10 @@ router.post(
         plan.project_id,
         plan.blocked_task_id,
         planId,
-        approvedFingerprint,
+         currentFingerprint,
         paypalInvoiceId,
-        `Recovery plan approved by ${approverActor}: Schedule rerouted and PayPal invoice split to $${(plan.immediate_unlock_minor / 100).toFixed(2)}`,
-        JSON.stringify({ approverActor, planId, approvedFingerprint }),
+         `Recovery plan approved by ${approverActor}: Schedule rerouted and PayPal invoice split to ${minorUnitsToDisplayString(plan.immediate_unlock_minor, 'USD')}`,
+         JSON.stringify({ approverActor, planId, approvedFingerprint: currentFingerprint }),
         now
       );
     });
@@ -240,7 +279,12 @@ router.post(
       success: true,
       message: 'Recovery plan approved, schedule rerouted, and PayPal invoice updated',
       planId,
+      invoiceId: paypalInvoiceId,
+      minimumAmountDueMinor: plan.immediate_unlock_minor,
       qrCodeBase64,
+      reminderSentAt,
+      recipientViewUrl,
+      nudgeMessage: customNudgeNote ?? plan.nudge_draft_text,
       tasks: updatedTasks,
     });
   }
@@ -276,16 +320,7 @@ router.post(
       return;
     }
 
-    // 2. Verify state fingerprint
-    if (plan.state_fingerprint !== approvedFingerprint) {
-      res.status(409).json({
-        error: 'Fingerprint mismatch between approved record and order payload',
-        reasonCodes: ['STALE_FINGERPRINT_APPROVAL'],
-      });
-      return;
-    }
-
-    // 3. Load Task and Supplier Quote
+    // 2. Load Task and Supplier Quote
     const task = TaskRepo.findById(taskId);
     const quote = db
       .prepare<[string], SupplierQuote>(
@@ -293,8 +328,32 @@ router.post(
       )
       .get(quoteId);
 
-    if (!task || !quote) {
+    if (!task || !quote || task.project_id !== plan.project_id || quote.task_id !== task.task_id) {
       res.status(404).json({ error: 'Task or supplier quote not found' });
+      return;
+    }
+    const projectCurrency = ProjectRepo.findById(task.project_id)?.currency ?? 'USD';
+
+    const currentFingerprint = computeStateFingerprint({
+      projectId: plan.project_id,
+      blockedTaskId: plan.blocked_task_id,
+      promotedTaskId: plan.promoted_task_id,
+      invoiceId: task.paypal_invoice_id ?? `${plan.project_id}:${plan.blocked_task_id}`,
+      unlockAmountMinor: plan.immediate_unlock_minor,
+      channel3ProductId: quote.external_product_id,
+      supplierTotalMinor: quote.total_minor,
+      currency: quote.currency,
+    });
+    const approval = db
+      .prepare<[string], { approved_fingerprint: string }>(
+        'SELECT approved_fingerprint FROM user_approvals WHERE plan_id = ? ORDER BY approved_at DESC LIMIT 1'
+      )
+      .get(planId);
+    if (currentFingerprint !== approvedFingerprint || plan.state_fingerprint !== currentFingerprint || approval?.approved_fingerprint !== currentFingerprint) {
+      res.status(409).json({
+        error: 'Fingerprint mismatch between approved record and current order state',
+        reasonCodes: ['STALE_FINGERPRINT_APPROVAL'],
+      });
       return;
     }
 
@@ -320,7 +379,7 @@ router.post(
         materials_in_warehouse: true,
       },
       completedTaskIds,
-      phaseCurrency: 'USD',
+       phaseCurrency: quote.currency,
       phaseBudgetMaxMinor: task.phase_hardware_budget_max_minor || 160000,
       historicalUnitPriceMinor: task.historical_unit_price_minor || 38000,
       maxAllowedVariancePct: task.max_allowed_variance_pct || 10.0,
@@ -328,8 +387,8 @@ router.post(
         currency: quote.currency,
         unitPriceMinor: quote.unit_price_minor,
         quantity: quote.quantity,
-        shippingMinor: quote.shipping_minor ?? 0,
-        taxMinor: quote.tax_minor ?? 0,
+         shippingMinor: quote.shipping_minor,
+         taxMinor: quote.tax_minor,
       },
       hasExplicitUserApproval: true,
     });
@@ -373,7 +432,7 @@ router.post(
         planId,
         order.id,
         order.status,
-        quote.currency,
+            projectCurrency,
         quote.total_minor,
         JSON.stringify(order),
         now
@@ -439,6 +498,14 @@ router.post(
       res.status(404).json({ error: `Task '${taskId}' not found` });
       return;
     }
+    const plan = planId
+      ? db.prepare<[string], CascadeRecoveryPlan>('SELECT * FROM recovery_plans WHERE plan_id = ?').get(planId)
+      : undefined;
+    if (planId && (!plan || plan.project_id !== task.project_id || plan.promoted_task_id !== task.task_id)) {
+      res.status(404).json({ error: 'Recovery plan does not belong to capture task project' });
+      return;
+    }
+    const projectCurrency = ProjectRepo.findById(task.project_id)?.currency ?? 'USD';
 
     try {
       console.log(`[Recovery] Capturing PayPal Sandbox order ${orderId}...`);
@@ -453,9 +520,15 @@ router.post(
         return;
       }
 
-      const captureId =
-        captureResult.purchase_units?.[0]?.payments?.captures?.[0]?.id ||
-        orderId;
+       const capture = captureResult.purchase_units?.[0]?.payments?.captures?.[0];
+       const captureId = capture?.id;
+       if (!captureId || capture.status !== 'COMPLETED') {
+         res.status(502).json({
+           error: 'PayPal capture response did not contain a completed capture ID',
+           captureResult,
+         });
+         return;
+       }
 
       const now = new Date().toISOString();
 
@@ -477,19 +550,20 @@ router.post(
 
         // Record capture transaction in paypal_transactions
         db.prepare(
-          `INSERT INTO paypal_transactions (
+           `INSERT INTO paypal_transactions (
             transaction_record_id, project_id, task_id, plan_id, kind,
             paypal_resource_id, paypal_capture_id, status, currency, amount_minor,
             raw_response_json, created_at
-          ) VALUES (?, ?, ?, ?, 'ORDER_CAPTURE', ?, ?, 'COMPLETED', 'USD', ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, 'ORDER_CAPTURE', ?, ?, 'COMPLETED', ?, ?, ?, ?)`
         ).run(
           randomUUID(),
           task.project_id,
           task.task_id,
           planId ?? null,
-          orderId,
-          captureId,
-          task.materials_unlock_minor,
+           orderId,
+           captureId,
+           projectCurrency,
+           task.materials_unlock_minor,
           JSON.stringify(captureResult),
           now
         );

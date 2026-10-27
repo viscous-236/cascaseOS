@@ -53,13 +53,13 @@ export const ManualTaskInputSchema = z.object({
   historical_unit_price_minor: z.number().int().nonnegative().nullable().optional(),
   max_allowed_variance_pct: z.number().default(10.0),
   create_live_paypal_invoice: z.boolean().default(false),
-});
+}).strict();
 
 export const TaskDependencyInputSchema = z.object({
   from_task_id: z.string().min(1),
   to_task_id: z.string().min(1),
   lag_days: z.number().int().default(0),
-});
+}).strict();
 
 // =============================================================================
 // AI GENERATED BLUEPRINT SCHEMA (SEC-102)
@@ -133,7 +133,7 @@ export const AiTaskBlueprintSchema = z.object({
     .number()
     .default(10.0)
     .describe('Maximum allowed variance percentage above historical baseline before block'),
-});
+}).strict();
 
 export const AiGeneratedProjectBlueprintSchema = z.object({
   project_name: z.string().min(3),
@@ -146,7 +146,7 @@ export const AiGeneratedProjectBlueprintSchema = z.object({
   dependencies: z
     .array(TaskDependencyInputSchema)
     .describe('Directed finish-to-start dependencies linking upstream and downstream phases'),
-});
+}).strict();
 
 export type AiGeneratedProjectBlueprint = z.infer<typeof AiGeneratedProjectBlueprintSchema>;
 
@@ -168,6 +168,7 @@ export const CreateCustomProjectSchema = z
     create_live_paypal_invoices: z.boolean().default(true),
     run_live_channel3_audit: z.boolean().default(true),
   })
+  .strict()
   .refine(
     (data) => {
       if (data.mode === 'AI_ARCHITECT') {
@@ -191,6 +192,7 @@ export type CreateCustomProjectInput = z.infer<typeof CreateCustomProjectSchema>
 // =============================================================================
 
 export const UpsertTaskSchema = z.object({
+  task_id: z.string().min(1).optional(),
   name: z.string().min(2).optional(),
   start_date: z.string().regex(IsoDateRegex).optional(),
   end_date: z.string().regex(IsoDateRegex).optional(),
@@ -213,7 +215,7 @@ export const UpsertTaskSchema = z.object({
   max_allowed_variance_pct: z.number().optional(),
   create_live_paypal_invoice: z.boolean().optional(),
   run_live_channel3_audit: z.boolean().optional(),
-});
+}).strict();
 
 export type UpsertTaskInput = z.infer<typeof UpsertTaskSchema>;
 
@@ -221,6 +223,6 @@ export const CreateDependencySchema = z.object({
   from_task_id: z.string().min(1),
   to_task_id: z.string().min(1),
   lag_days: z.number().int().default(0),
-});
+}).strict();
 
 export type CreateDependencyInput = z.infer<typeof CreateDependencySchema>;

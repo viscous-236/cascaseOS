@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import type { CreateCustomProjectPayload, ManualTaskInput, TaskDependencyInput } from '@/types/domain';
+import { useDialog } from './ui/useDialog';
 
 interface PresetItem {
   id: string;
@@ -189,7 +190,8 @@ export const NewProjectModal: React.FC = () => {
   ]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const dialogRef = useDialog(isNewProjectModalOpen, () => { if (!isSubmitting) closeNewProjectModal(); });
 
   const applyPreset = (preset: PresetItem) => {
     setProjectName(preset.projectName);
@@ -242,11 +244,7 @@ export const NewProjectModal: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setCurrentStepIndex(0);
-
-    const stepInterval = setInterval(() => {
-      setCurrentStepIndex((prev) => (prev < 2 ? prev + 1 : prev));
-    }, 1200);
+    setSubmitError(null);
 
     try {
       const payload: CreateCustomProjectPayload =
@@ -278,9 +276,10 @@ export const NewProjectModal: React.FC = () => {
       const success = await createCustomProject(payload);
       if (success) {
         closeNewProjectModal();
+      } else {
+        setSubmitError('Project creation failed. Review the error notification, check your inputs, and try again. Your entries are preserved.');
       }
     } finally {
-      clearInterval(stepInterval);
       setIsSubmitting(false);
     }
   };
@@ -296,15 +295,20 @@ export const NewProjectModal: React.FC = () => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={isSubmitting ? undefined : closeNewProjectModal}
-          className="fixed inset-0 bg-neutral-950/70 backdrop-blur-md"
+          className="fixed inset-0 dialog-backdrop"
         />
 
         {/* Modal Window */}
         <motion.div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-project-title"
+          tabIndex={-1}
           initial={{ opacity: 0, scale: 0.96, y: 12 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 12 }}
-          className="relative w-full max-w-4xl max-h-[90vh] bg-white dark:bg-[#0c0e14] border border-neutral-200 dark:border-white/[0.1] rounded-2xl shadow-2xl flex flex-col overflow-hidden z-10 transition-colors"
+          className="dialog-panel new-project-panel relative w-full max-w-4xl flex flex-col overflow-hidden z-10"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-white/[0.08] bg-neutral-50/80 dark:bg-neutral-900/40">
@@ -313,16 +317,17 @@ export const NewProjectModal: React.FC = () => {
                 <Sparkles className="w-4 h-4" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-neutral-900 dark:text-white tracking-tight">
-                  Create New FinOps Project
+                <h2 id="new-project-title" className="text-sm font-semibold text-neutral-900 dark:text-white tracking-tight">
+                  Create a project
                 </h2>
                 <p className="text-xs text-neutral-500 font-mono">
-                  Multi-Tenant Project Provisioner with Live PayPal & Channel3 Graph Audits
+                  Build the schedule. Connect its invoices and suppliers.
                 </p>
               </div>
             </div>
 
             <button
+              aria-label="Close project creation"
               onClick={closeNewProjectModal}
               disabled={isSubmitting}
               className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors disabled:opacity-40"
@@ -332,10 +337,11 @@ export const NewProjectModal: React.FC = () => {
           </div>
 
           {/* Mode Switcher Tabs */}
-          <div className="flex items-center gap-2 px-6 pt-3 pb-2 border-b border-neutral-100 dark:border-white/[0.04]">
+          <div className="project-mode-tabs flex items-center gap-2 px-6 pt-3 pb-2 border-b border-neutral-100 dark:border-white/[0.04]">
             <button
               type="button"
               onClick={() => setActiveTab('AI_ARCHITECT')}
+              aria-pressed={activeTab === 'AI_ARCHITECT'}
               disabled={isSubmitting}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                 activeTab === 'AI_ARCHITECT'
@@ -344,12 +350,13 @@ export const NewProjectModal: React.FC = () => {
               }`}
             >
               <Bot className="w-3.5 h-3.5" />
-              <span>Mode A: AI Schedule Architect</span>
+              <span>Generate from a brief</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('MANUAL_STRUCTURED')}
+              aria-pressed={activeTab === 'MANUAL_STRUCTURED'}
               disabled={isSubmitting}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
                 activeTab === 'MANUAL_STRUCTURED'
@@ -358,7 +365,7 @@ export const NewProjectModal: React.FC = () => {
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Mode B: Structured Phase Builder</span>
+              <span>Build phases manually</span>
             </button>
           </div>
 
@@ -371,6 +378,7 @@ export const NewProjectModal: React.FC = () => {
                   Project Title
                 </label>
                 <input
+                  aria-label="Project title"
                   type="text"
                   required
                   value={projectName}
@@ -385,6 +393,7 @@ export const NewProjectModal: React.FC = () => {
                   Start Date
                 </label>
                 <input
+                  aria-label="Project start date"
                   type="date"
                   required
                   value={startDate}
@@ -402,6 +411,7 @@ export const NewProjectModal: React.FC = () => {
                   type="text"
                   required
                   value={clientName}
+                  aria-label="Client name"
                   onChange={(e) => setClientName(e.target.value)}
                   disabled={isSubmitting}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-neutral-400 font-sans"
@@ -414,6 +424,7 @@ export const NewProjectModal: React.FC = () => {
                 </label>
                 <input
                   type="email"
+                  aria-label="Client billing email"
                   required
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
@@ -474,6 +485,7 @@ export const NewProjectModal: React.FC = () => {
                     </span>
                   </label>
                   <textarea
+                    aria-label="Project brief and sourcing requirements"
                     rows={4}
                     required
                     value={aiPrompt}
@@ -515,7 +527,7 @@ export const NewProjectModal: React.FC = () => {
                       key={t.task_id || index}
                       className="p-3 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/30 space-y-2 text-xs"
                     >
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="manual-phase-title flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 flex-1">
                           <span className="font-mono text-[10px] text-neutral-400 px-1.5 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-800">
                             #{index + 1}
@@ -523,6 +535,7 @@ export const NewProjectModal: React.FC = () => {
                           <input
                             type="text"
                             value={t.name}
+                            aria-label={`Phase ${index + 1} name`}
                             onChange={(e) => {
                               const val = e.target.value;
                               setManualTasks((prev) =>
@@ -541,6 +554,7 @@ export const NewProjectModal: React.FC = () => {
                             min={1}
                             max={30}
                             value={t.duration_days}
+                            aria-label={`Phase ${index + 1} duration`}
                             onChange={(e) => {
                               const val = parseInt(e.target.value) || 1;
                               setManualTasks((prev) =>
@@ -574,6 +588,7 @@ export const NewProjectModal: React.FC = () => {
                           <input
                             type="text"
                             value={t.sku_search_query || ''}
+                            aria-label={`Phase ${index + 1} hardware query`}
                             onChange={(e) => {
                               const val = e.target.value || null;
                               setManualTasks((prev) =>
@@ -593,6 +608,9 @@ export const NewProjectModal: React.FC = () => {
                           </label>
                           <input
                             type="number"
+                            aria-label={`Phase ${index + 1} incumbent unit price`}
+                            min={0}
+                            step="0.01"
                             value={
                               t.incumbent_unit_price_minor
                                 ? t.incumbent_unit_price_minor / 100
@@ -622,6 +640,7 @@ export const NewProjectModal: React.FC = () => {
                             type="number"
                             min={0}
                             value={t.required_quantity}
+                            aria-label={`Phase ${index + 1} required quantity`}
                             onChange={(e) => {
                               const val = parseInt(e.target.value) || 0;
                               setManualTasks((prev) =>
@@ -680,47 +699,32 @@ export const NewProjectModal: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-950 font-mono space-y-2 text-xs"
+                role="status"
+                className="provision-status space-y-2 text-xs"
               >
                 <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-600">
-                  <span>Provisioning Engine Active</span>
-                  <span className="animate-pulse flex items-center gap-1.5 text-emerald-400 dark:text-emerald-600">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    Executing Live Pipelines...
-                  </span>
+                  <span>Creating project. Waiting for server confirmation.</span>
                 </div>
 
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center gap-2">
-                    {currentStepIndex >= 0 ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 text-neutral-500" />
-                    )}
-                    <span className={currentStepIndex === 0 ? 'font-bold underline' : ''}>
-                      1. Kahn In-Degree DAG Cycle Verification & Topological Ordering
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      Validate milestone dependencies
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {currentStepIndex >= 1 ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 text-neutral-500" />
-                    )}
-                    <span className={currentStepIndex === 1 ? 'font-bold underline' : ''}>
-                      2. Provisioning Live PayPal Sandbox Invoices & Sending Client Drafts
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      {createPayPalInvoices ? 'Provision requested PayPal sandbox invoices' : 'Invoice provisioning disabled'}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    {currentStepIndex >= 2 ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 text-neutral-500" />
-                    )}
-                    <span className={currentStepIndex === 2 ? 'font-bold underline' : ''}>
-                      3. Querying Channel3 Product Graph & Auditing Supplier Arbitrage
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      {runChannel3Audit ? 'Look up requested supplier quotes' : 'Supplier lookup disabled'}
                     </span>
                   </div>
                 </div>
@@ -728,6 +732,7 @@ export const NewProjectModal: React.FC = () => {
             )}
 
             {/* Footer Buttons */}
+            {submitError && <p role="alert" className="connection-error">{submitError}</p>}
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-neutral-100 dark:border-white/[0.04]">
               <button
                 type="button"

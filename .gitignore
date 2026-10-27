@@ -32,3 +32,9 @@ Thumbs.db
 
 # Plan files (internal, not for submission)
 plan/
+
+# Local design inspection captures and browser fixtures (may contain project data)
+.taste-skill/
+client/.impeccable/review/
+client/.impeccable/mocks/
+client/.impeccable/*.local.json

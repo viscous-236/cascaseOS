@@ -14,7 +14,7 @@
 import React, { useEffect, useState } from 'react';
 import type { AgWidgetParams } from 'ag-studio';
 import { useCascadeState } from '@/context/CascadeStateContext';
-import { formatMinorToUSD } from '@/utils/formatters';
+import { formatMinorToUSD, formatVariancePct } from '@/utils/formatters';
 import {
   ShieldAlert,
   Sparkles,
@@ -26,21 +26,31 @@ import {
   ExternalLink
 } from 'lucide-react';
 
-export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi }) => {
-  const { state, openApprovalModal, activePlan, selectedReasonCode, selectReasonCode } = useCascadeState();
+export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dataMapping }) => {
+  const { state, openApprovalModal, activePlan, selectedReasonCode, selectReasonCode, selectedTaskId } = useCascadeState();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    widgetApi.setDisplayState('displayed');
-  }, [widgetApi]);
+    const fields = Object.values(dataMapping).flat() as any[];
+    if (fields.length === 0) {
+      widgetApi.setDisplayState('displayed');
+      return;
+    }
+    widgetApi.setDisplayState('loading');
+    void widgetApi.getData({ fields }, { crossFilter: 'highlight' })
+      .then(() => widgetApi.setDisplayState('displayed'))
+      .catch(() => widgetApi.setDisplayState('noData'));
+  }, [widgetApi, dataMapping]);
 
-  const quotes = state?.supplierQuotes || [];
+  const quoteTaskId = selectedTaskId ?? activePlan?.blocked_task_id ?? state?.tasks[0]?.task_id;
+  const quotes = state?.supplierQuotes.filter((quote) => quote.task_id === quoteTaskId) || [];
   const incumbent = quotes.find((q) => q.source_type === 'INCUMBENT_INVOICE');
   const channel3 = quotes.find((q) => q.source_type === 'CHANNEL3_LIVE');
 
-  const reasonCodes = activePlan?.reason_codes_json
-    ? JSON.parse(activePlan.reason_codes_json)
-    : ['HARD_DEPENDENCY_VIOLATION', 'VENDOR_PRICE_CREEP_EXCEEDED'];
+  const reasonCodes = (() => {
+    if (!activePlan?.reason_codes_json) return [];
+    try { return JSON.parse(activePlan.reason_codes_json) as string[]; } catch { return []; }
+  })();
 
   const handleReasonClick = (code: string) => {
     selectReasonCode(code);
@@ -53,12 +63,11 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi }) =
         values: [code],
       } as any);
     } catch {
-      // Fallback
     }
   };
 
   return (
-    <div className="h-full w-full bg-white dark:bg-[#0c0e14] text-neutral-900 dark:text-neutral-100 p-4 flex flex-col justify-between overflow-y-auto font-sans transition-colors duration-200">
+    <div className="studio-widget h-full w-full p-4 flex flex-col justify-between overflow-y-auto font-sans">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2 mb-3">
         <div className="flex items-center space-x-2">
@@ -73,7 +82,7 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi }) =
         </div>
 
         <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60">
-          $2,800 IDLE RISK
+           {activePlan ? formatMinorToUSD(activePlan.total_exposure_minor) : 'No active plan'}
         </span>
       </div>
 
@@ -83,30 +92,30 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi }) =
         <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800 font-mono space-y-1">
           <div className="text-[10px] text-rose-600 dark:text-rose-400 font-medium uppercase flex items-center justify-between">
             <span>Incumbent</span>
-            <span>BLOCKED</span>
+            <span>{incumbent ? 'Observed quote' : 'Awaiting quote'}</span>
           </div>
           <div className="text-neutral-800 dark:text-neutral-200 font-medium text-xs truncate">
-            {incumbent?.merchant_name || 'Carrier Supply'}
+            {incumbent?.merchant_name || 'No incumbent quote'}
           </div>
           <div className="text-neutral-500 text-[11px]">
-            Unit: <strong className="text-neutral-900 dark:text-white">{formatMinorToUSD(incumbent?.unit_price_minor || 49000)}</strong>
+            Unit: <strong className="text-neutral-900 dark:text-white">{incumbent ? formatMinorToUSD(incumbent.unit_price_minor) : '—'}</strong>
           </div>
-          <div className="text-[10px] text-rose-600 dark:text-rose-400">+28.95% over baseline</div>
+          <div className="text-[10px] text-rose-600 dark:text-rose-400">{incumbent ? `${formatVariancePct(incumbent.variance_vs_historical_pct)} over baseline` : 'Awaiting baseline'}</div>
         </div>
 
         {/* Channel3 Live */}
         <div className="p-2.5 rounded-xl bg-emerald-50/50 dark:bg-neutral-900/50 border border-emerald-200 dark:border-emerald-800/40 font-mono space-y-1">
           <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium uppercase flex items-center justify-between">
             <span>Channel3</span>
-            <span>APPROVED</span>
+            <span>{channel3 ? channel3.availability_status : 'Awaiting quote'}</span>
           </div>
           <div className="text-neutral-800 dark:text-neutral-200 font-medium text-xs truncate">
-            {channel3?.merchant_name || 'Trane Direct'}
+            {channel3?.merchant_name || 'No live quote'}
           </div>
           <div className="text-neutral-500 text-[11px]">
-            Unit: <strong className="text-emerald-600 dark:text-emerald-400">{formatMinorToUSD(channel3?.unit_price_minor || 34900)}</strong>
+            Unit: <strong className="text-emerald-600 dark:text-emerald-400">{channel3 ? formatMinorToUSD(channel3.unit_price_minor) : '—'}</strong>
           </div>
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Save $564.00 (28.78%)</div>
+          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">{channel3 ? `Save ${formatMinorToUSD(channel3.savings_vs_incumbent_minor)}` : 'Awaiting live quote'}</div>
         </div>
       </div>
 
@@ -135,6 +144,7 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi }) =
       {/* Primary Action Button */}
       <button
         onClick={() => openApprovalModal()}
+        disabled={!activePlan}
         className="w-full py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 font-medium text-xs font-mono flex items-center justify-center space-x-1.5 transition-all shadow-sm"
       >
         <span>Approve Reroute & Split Invoice</span>

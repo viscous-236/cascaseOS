@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T07:15:06.151Z",
+  "title": "Design System: CascadeOS",
+  "extensions": {
+    "colorMeta": {
+      "dark-canvas": { "role": "neutral", "displayName": "Dark ground", "tonalRamp": ["oklch(15% .002 260)", "oklch(27% .004 260)", "oklch(38% .006 260)", "oklch(49% .008 260)", "oklch(61% .008 260)", "oklch(72% .006 260)", "oklch(84% .004 260)", "oklch(95% .002 260)"] },
+      "dark-surface": { "role": "neutral", "displayName": "Dark sheet", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "dark-surface-raised": { "role": "neutral", "displayName": "Dark raised sheet", "tonalRamp": ["oklch(15% .002 229)", "oklch(27% .004 229)", "oklch(38% .006 229)", "oklch(49% .008 229)", "oklch(61% .008 229)", "oklch(72% .006 229)", "oklch(84% .004 229)", "oklch(95% .002 229)"] },
+      "dark-surface-hover": { "role": "neutral", "displayName": "Dark hover plane", "tonalRamp": ["oklch(15% .002 220)", "oklch(27% .004 220)", "oklch(38% .006 220)", "oklch(49% .008 220)", "oklch(61% .008 220)", "oklch(72% .006 220)", "oklch(84% .004 220)", "oklch(95% .002 220)"] },
+      "dark-text": { "role": "neutral", "displayName": "Dark primary text", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "dark-text-soft": { "role": "neutral", "displayName": "Dark supporting text", "tonalRamp": ["oklch(15% .002 235)", "oklch(27% .005 235)", "oklch(38% .008 235)", "oklch(49% .012 235)", "oklch(61% .012 235)", "oklch(72% .008 235)", "oklch(84% .005 235)", "oklch(95% .002 235)"] },
+      "dark-text-muted": { "role": "neutral", "displayName": "Dark annotation text", "tonalRamp": ["oklch(15% .002 233)", "oklch(27% .005 233)", "oklch(38% .008 233)", "oklch(49% .012 233)", "oklch(61% .012 233)", "oklch(72% .008 233)", "oklch(84% .005 233)", "oklch(95% .002 233)"] },
+      "dark-line": { "role": "neutral", "displayName": "Dark sheet rule", "tonalRamp": ["oklch(15% .002 238)", "oklch(27% .005 238)", "oklch(38% .008 238)", "oklch(49% .012 238)", "oklch(61% .012 238)", "oklch(72% .008 238)", "oklch(84% .005 238)", "oklch(95% .002 238)"] },
+      "dark-line-strong": { "role": "neutral", "displayName": "Dark control rule", "tonalRamp": ["oklch(15% .003 238)", "oklch(27% .007 238)", "oklch(38% .011 238)", "oklch(49% .016 238)", "oklch(61% .016 238)", "oklch(72% .011 238)", "oklch(84% .007 238)", "oklch(95% .003 238)"] },
+      "dark-primary": { "role": "primary", "displayName": "Reversed ink", "tonalRamp": ["oklch(15% .002 235)", "oklch(27% .004 235)", "oklch(38% .006 235)", "oklch(49% .008 235)", "oklch(61% .008 235)", "oklch(72% .006 235)", "oklch(84% .004 235)", "oklch(95% .002 235)"] },
+      "dark-on-primary": { "role": "neutral", "displayName": "Reversed ink foreground", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "dark-blue": { "role": "primary", "displayName": "Dark schedule blue", "tonalRamp": ["oklch(15% .015 258)", "oklch(27% .04 258)", "oklch(38% .07 258)", "oklch(49% .1 258)", "oklch(61% .1 258)", "oklch(72% .07 258)", "oklch(84% .04 258)", "oklch(95% .012 258)"] },
+      "dark-blue-soft": { "role": "primary", "displayName": "Dark selection wash", "tonalRamp": ["oklch(15% .005 258)", "oklch(27% .012 258)", "oklch(38% .02 258)", "oklch(49% .03 258)", "oklch(61% .03 258)", "oklch(72% .02 258)", "oklch(84% .012 258)", "oklch(95% .005 258)"] },
+      "dark-green": { "role": "semantic", "displayName": "Dark readiness green", "tonalRamp": ["oklch(15% .012 160)", "oklch(27% .03 160)", "oklch(38% .05 160)", "oklch(49% .07 160)", "oklch(61% .07 160)", "oklch(72% .05 160)", "oklch(84% .03 160)", "oklch(95% .01 160)"] },
+      "dark-green-soft": { "role": "semantic", "displayName": "Dark readiness wash", "tonalRamp": ["oklch(15% .006 157)", "oklch(27% .014 157)", "oklch(38% .025 157)", "oklch(49% .035 157)", "oklch(61% .035 157)", "oklch(72% .025 157)", "oklch(84% .014 157)", "oklch(95% .006 157)"] },
+      "dark-amber": { "role": "semantic", "displayName": "Dark review amber", "tonalRamp": ["oklch(15% .015 79)", "oklch(27% .04 79)", "oklch(38% .07 79)", "oklch(49% .1 79)", "oklch(61% .1 79)", "oklch(72% .07 79)", "oklch(84% .04 79)", "oklch(95% .012 79)"] },
+      "dark-amber-soft": { "role": "semantic", "displayName": "Dark review wash", "tonalRamp": ["oklch(15% .004 86)", "oklch(27% .01 86)", "oklch(38% .018 86)", "oklch(49% .025 86)", "oklch(61% .025 86)", "oklch(72% .018 86)", "oklch(84% .01 86)", "oklch(95% .004 86)"] },
+      "dark-red": { "role": "semantic", "displayName": "Dark blocker red", "tonalRamp": ["oklch(15% .015 15)", "oklch(27% .04 15)", "oklch(38% .07 15)", "oklch(49% .1 15)", "oklch(61% .1 15)", "oklch(72% .07 15)", "oklch(84% .04 15)", "oklch(95% .012 15)"] },
+      "dark-red-soft": { "role": "semantic", "displayName": "Dark blocker wash", "tonalRamp": ["oklch(15% .005 4)", "oklch(27% .012 4)", "oklch(38% .02 4)", "oklch(49% .03 4)", "oklch(61% .03 4)", "oklch(72% .02 4)", "oklch(84% .012 4)", "oklch(95% .005 4)"] },
+      "dark-overlay": { "role": "neutral", "displayName": "Dark appearance scrim", "tonalRamp": ["oklch(15% 0 0 / 60%)", "oklch(27% 0 0 / 60%)", "oklch(38% 0 0 / 60%)", "oklch(49% 0 0 / 60%)", "oklch(61% 0 0 / 60%)", "oklch(72% 0 0 / 60%)", "oklch(84% 0 0 / 60%)", "oklch(95% 0 0 / 60%)"] },
+      "canvas": { "role": "neutral", "displayName": "Cool paper", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "surface": { "role": "neutral", "displayName": "Sheet", "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(38% 0 0)", "oklch(49% 0 0)", "oklch(61% 0 0)", "oklch(72% 0 0)", "oklch(84% 0 0)", "oklch(95% 0 0)"] },
+      "surface-raised": { "role": "neutral", "displayName": "Raised paper", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "surface-hover": { "role": "neutral", "displayName": "Hover plane", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "text": { "role": "neutral", "displayName": "Graphite text", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .004 248)", "oklch(38% .006 248)", "oklch(49% .008 248)", "oklch(61% .008 248)", "oklch(72% .006 248)", "oklch(84% .004 248)", "oklch(95% .002 248)"] },
+      "text-soft": { "role": "neutral", "displayName": "Supporting graphite", "tonalRamp": ["oklch(15% .003 248)", "oklch(27% .008 248)", "oklch(38% .014 248)", "oklch(49% .018 248)", "oklch(61% .018 248)", "oklch(72% .014 248)", "oklch(84% .008 248)", "oklch(95% .003 248)"] },
+      "text-muted": { "role": "neutral", "displayName": "Annotation graphite", "tonalRamp": ["oklch(15% .003 248)", "oklch(27% .008 248)", "oklch(38% .014 248)", "oklch(49% .018 248)", "oklch(61% .018 248)", "oklch(72% .014 248)", "oklch(84% .008 248)", "oklch(95% .003 248)"] },
+      "line": { "role": "neutral", "displayName": "Sheet rule", "tonalRamp": ["oklch(15% .002 240)", "oklch(27% .004 240)", "oklch(38% .006 240)", "oklch(49% .008 240)", "oklch(61% .008 240)", "oklch(72% .006 240)", "oklch(84% .004 240)", "oklch(95% .002 240)"] },
+      "line-strong": { "role": "neutral", "displayName": "Control rule", "tonalRamp": ["oklch(15% .003 245)", "oklch(27% .008 245)", "oklch(38% .014 245)", "oklch(49% .018 245)", "oklch(61% .018 245)", "oklch(72% .014 245)", "oklch(84% .008 245)", "oklch(95% .003 245)"] },
+      "primary": { "role": "primary", "displayName": "Graphite ink", "tonalRamp": ["oklch(15% .002 248)", "oklch(27% .005 248)", "oklch(38% .008 248)", "oklch(49% .012 248)", "oklch(61% .012 248)", "oklch(72% .008 248)", "oklch(84% .005 248)", "oklch(95% .002 248)"] },
+      "on-primary": { "role": "neutral", "displayName": "Ink foreground", "tonalRamp": ["oklch(15% 0 0)", "oklch(27% 0 0)", "oklch(38% 0 0)", "oklch(49% 0 0)", "oklch(61% 0 0)", "oklch(72% 0 0)", "oklch(84% 0 0)", "oklch(95% 0 0)"] },
+      "blue": { "role": "primary", "displayName": "Schedule blue", "tonalRamp": ["oklch(15% .025 258)", "oklch(27% .065 258)", "oklch(38% .11 258)", "oklch(49% .16 258)", "oklch(61% .16 258)", "oklch(72% .11 258)", "oklch(84% .065 258)", "oklch(95% .02 258)"] },
+      "blue-soft": { "role": "primary", "displayName": "Selection wash", "tonalRamp": ["oklch(15% .003 258)", "oklch(27% .008 258)", "oklch(38% .014 258)", "oklch(49% .02 258)", "oklch(61% .02 258)", "oklch(72% .014 258)", "oklch(84% .008 258)", "oklch(95% .003 258)"] },
+      "green": { "role": "semantic", "displayName": "Readiness green", "tonalRamp": ["oklch(15% .015 158)", "oklch(27% .035 158)", "oklch(38% .06 158)", "oklch(49% .085 158)", "oklch(61% .085 158)", "oklch(72% .06 158)", "oklch(84% .035 158)", "oklch(95% .012 158)"] },
+      "green-soft": { "role": "semantic", "displayName": "Readiness wash", "tonalRamp": ["oklch(15% .003 158)", "oklch(27% .008 158)", "oklch(38% .014 158)", "oklch(49% .02 158)", "oklch(61% .02 158)", "oklch(72% .014 158)", "oklch(84% .008 158)", "oklch(95% .003 158)"] },
+      "amber": { "role": "semantic", "displayName": "Review amber", "tonalRamp": ["oklch(15% .015 74)", "oklch(27% .04 74)", "oklch(38% .07 74)", "oklch(49% .1 74)", "oklch(61% .1 74)", "oklch(72% .07 74)", "oklch(84% .04 74)", "oklch(95% .012 74)"] },
+      "amber-soft": { "role": "semantic", "displayName": "Review wash", "tonalRamp": ["oklch(15% .004 83)", "oklch(27% .01 83)", "oklch(38% .018 83)", "oklch(49% .025 83)", "oklch(61% .025 83)", "oklch(72% .018 83)", "oklch(84% .01 83)", "oklch(95% .004 83)"] },
+      "red": { "role": "semantic", "displayName": "Blocker red", "tonalRamp": ["oklch(15% .02 22)", "oklch(27% .055 22)", "oklch(38% .1 22)", "oklch(49% .15 22)", "oklch(61% .15 22)", "oklch(72% .1 22)", "oklch(84% .055 22)", "oklch(95% .015 22)"] },
+      "red-soft": { "role": "semantic", "displayName": "Blocker wash", "tonalRamp": ["oklch(15% .003 5)", "oklch(27% .008 5)", "oklch(38% .014 5)", "oklch(49% .02 5)", "oklch(61% .02 5)", "oklch(72% .014 5)", "oklch(84% .008 5)", "oklch(95% .003 5)"] },
+      "overlay": { "role": "neutral", "displayName": "Light appearance scrim", "tonalRamp": ["oklch(15% .002 248 / 42%)", "oklch(27% .005 248 / 42%)", "oklch(38% .008 248 / 42%)", "oklch(49% .012 248 / 42%)", "oklch(61% .012 248 / 42%)", "oklch(72% .008 248 / 42%)", "oklch(84% .005 248 / 42%)", "oklch(95% .002 248 / 42%)"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Project headline", "purpose": "src/index.css: project header; 28px at the 1000px fold, 24px at 640px." },
+      "title": { "displayName": "Section title", "purpose": "src/index.css: section-heading h2, compact medium-weight hierarchy." },
+      "body": { "displayName": "Body", "purpose": "src/index.css: global Geist base; self-hosted 400/500/600/700 in public/fonts/." },
+      "label": { "displayName": "Label", "purpose": "src/index.css and src/components/workspace/Status.tsx: supporting labels and status wording." },
+      "control": { "displayName": "Control", "purpose": "src/index.css: primary and secondary button labels." },
+      "summary": { "displayName": "Financial summary", "purpose": "src/components/workspace/DeliveryOverview.tsx: tabular summary values." },
+      "summary-lead": { "displayName": "Leading financial value", "purpose": "src/index.css: summary-lead dd; mobile size is 24px, retaining weight 600." }
+    },
+    "shadows": [
+      { "name": "dialog-overlay", "value": "0 20px 80px rgb(0 0 0 / 18%)", "purpose": "src/index.css: dialog-panel; primary workspace panels remain flat." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(.23, 1, .32, 1)", "purpose": "src/index.css: --ease, used for press transforms and folded navigation." },
+      { "name": "button-transition", "value": "background-color 140ms ease, color 140ms ease, transform 140ms var(--ease)", "purpose": "src/index.css: button and icon-button state changes." },
+      { "name": "button-press", "value": "scale(.97)", "purpose": "src/index.css: active button and icon-button transform." },
+      { "name": "navigation-transition", "value": "transform 220ms var(--ease)", "purpose": "src/index.css: sidebar at max-width 1000px." },
+      { "name": "refresh-spin", "value": "spin .8s linear infinite", "purpose": "src/index.css: refresh activity; spin rotates to 360deg." },
+      { "name": "reduced-motion", "value": "animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important", "purpose": "src/index.css: prefers-reduced-motion: reduce, including pseudo-elements. src/App.tsx also sets MotionConfig reducedMotion=user." }
+    ],
+    "breakpoints": [
+      { "name": "mobile-max", "value": "640px" },
+      { "name": "navigation-fold-max", "value": "1000px" },
+      { "name": "stacked-workspace-max", "value": "1190px" },
+      { "name": "wide-workspace-min", "value": "1700px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Ink action from src/index.css; used by src/components/workspace/DeliveryOverview.tsx. Preview omits the optional trailing icon.",
+      "html": "<button type=\"button\" class=\"ds-button-primary\">Inspect phase financials</button>",
+      "css": ".ds-button-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 13px;border:1px solid transparent;border-radius:var(--control-radius,6px);background:var(--primary,#24282c);color:var(--on-primary,#ffffff);font:500 13px/1.5 var(--font,Geist,system-ui,sans-serif);cursor:pointer;transition:background-color 140ms ease,color 140ms ease,transform 140ms var(--ease,cubic-bezier(.23,1,.32,1))}.ds-button-primary:hover{opacity:.9}.ds-button-primary:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}.ds-button-primary:active{transform:scale(.97)}.ds-button-primary:disabled{opacity:.55;cursor:not-allowed}@media(max-width:640px){.ds-button-primary{min-height:44px}}@media(prefers-reduced-motion:reduce){.ds-button-primary{transition-duration:.001ms!important}}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Bordered action from src/index.css and the overview empty-filter state in src/components/workspace/DeliveryOverview.tsx.",
+      "html": "<button type=\"button\" class=\"ds-button-secondary\">Clear filters</button>",
+      "css": ".ds-button-secondary{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:8px 13px;border:1px solid var(--line-strong,#b9c0c6);border-radius:var(--control-radius,6px);background:var(--surface,#ffffff);color:var(--text,#202326);font:500 13px/1.5 var(--font,Geist,system-ui,sans-serif);cursor:pointer;transition:background-color 140ms ease,color 140ms ease,transform 140ms var(--ease,cubic-bezier(.23,1,.32,1))}.ds-button-secondary:hover{background:var(--surface-hover,#eceef0)}.ds-button-secondary:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}.ds-button-secondary:active{transform:scale(.97)}.ds-button-secondary:disabled{opacity:.55;cursor:not-allowed}@media(max-width:640px){.ds-button-secondary{min-height:44px}}@media(prefers-reduced-motion:reduce){.ds-button-secondary{transition-duration:.001ms!important}}"
+    },
+    {
+      "name": "Icon button",
+      "kind": "button",
+      "refersTo": "button-icon",
+      "description": "Readiness selector from src/components/workspace/DeliveryOverview.tsx; ChevronRight SVG from lucide-react, styling from src/index.css.",
+      "html": "<button type=\"button\" class=\"ds-button-icon\" aria-label=\"Show milestone readiness\" aria-pressed=\"false\"><svg width=\"17\" height=\"17\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"/></svg></button>",
+      "css": ".ds-button-icon{display:inline-flex;align-items:center;justify-content:center;gap:8px;flex-shrink:0;min-height:36px;width:36px;padding:0;border:1px solid transparent;border-radius:var(--control-radius,6px);background:transparent;color:var(--text-soft,#535b63);font:500 13px/1.5 var(--font,Geist,system-ui,sans-serif);cursor:pointer;transition:background-color 140ms ease,color 140ms ease,transform 140ms var(--ease,cubic-bezier(.23,1,.32,1))}.ds-button-icon:hover{background:var(--surface-hover,#eceef0)}.ds-button-icon:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}.ds-button-icon:active{transform:scale(.97)}.ds-button-icon:disabled{opacity:.55;cursor:not-allowed}@media(max-width:640px){.ds-button-icon{min-height:44px}}@media(prefers-reduced-motion:reduce){.ds-button-icon{transition-duration:.001ms!important}}"
+    },
+    {
+      "name": "Text action",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Quiet action from src/index.css; the register footer in src/components/workspace/DeliveryOverview.tsx.",
+      "html": "<button type=\"button\" class=\"ds-button-text\">Clear selection</button>",
+      "css": ".ds-button-text{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 0;border:0;background:transparent;color:var(--text-soft,#535b63);font:500 12px/1.5 var(--font,Geist,system-ui,sans-serif);white-space:nowrap;cursor:pointer}.ds-button-text:hover{color:var(--blue,#1d5fbf)}.ds-button-text:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}.ds-button-text:disabled{opacity:.55;cursor:not-allowed}@media(max-width:640px){.ds-button-text{min-height:40px}}"
+    },
+    {
+      "name": "Phase input",
+      "kind": "input",
+      "refersTo": "input-phase",
+      "description": "Phase-composer field from src/components/TimelinePane.tsx and src/index.css; distinct from quieter search inputs and dialog compatibility fields.",
+      "html": "<label class=\"ds-field-label\">Phase name<input class=\"ds-input-phase\" type=\"text\" /></label>",
+      "css": ".ds-field-label{display:grid;gap:6px;color:var(--text-soft,#535b63);font:400 12px/1.5 var(--font,Geist,system-ui,sans-serif)}.ds-input-phase{width:100%;min-width:0;min-height:36px;padding:7px;border:1px solid var(--line-strong,#b9c0c6);border-radius:var(--control-radius,6px);background:var(--surface,#ffffff);color:var(--text,#202326);font:400 12px/1.5 var(--font,Geist,system-ui,sans-serif);caret-color:var(--blue,#1d5fbf)}.ds-input-phase::placeholder{color:var(--text-muted,#626a72);opacity:1}.ds-input-phase:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}"
+    },
+    {
+      "name": "Workspace navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Label and selection treatment from src/components/workspace/Sidebar.tsx and src/index.css. Text-only excerpt; full application links include Lucide icons.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Workspace views\"><a class=\"ds-nav-item\" href=\"#overview\" aria-current=\"page\">Delivery overview</a><a class=\"ds-nav-item\" href=\"#recovery\">Recovery plans</a></nav>",
+      "css": ".ds-nav{display:grid;gap:4px}.ds-nav-item{display:flex;align-items:center;gap:10px;min-height:40px;padding:9px 12px;border:0;border-radius:var(--control-radius,6px);background:transparent;color:var(--text-soft,#535b63);font:400 13px/1.5 var(--font,Geist,system-ui,sans-serif);text-align:left;text-decoration:none}.ds-nav-item[aria-current=page]{color:var(--text,#202326);background:var(--surface-hover,#eceef0);font-weight:500}.ds-nav-item:hover{background:var(--surface-hover,#eceef0);color:var(--text,#202326)}.ds-nav-item:focus-visible{outline:2px solid var(--blue,#1d5fbf);outline-offset:3px}"
+    },
+    {
+      "name": "Quiet tag",
+      "kind": "chip",
+      "refersTo": "quiet-tag",
+      "description": "Non-interactive annotation from src/index.css and src/components/workspace/SupplierWorkspace.tsx. Preview label is illustrative, without a fabricated quote count.",
+      "html": "<span class=\"ds-quiet-tag\">Supplier quotes</span>",
+      "css": ".ds-quiet-tag{padding:4px 8px;border-radius:4px;background:var(--surface-raised,#f6f7f8);color:var(--text-soft,#535b63);font:400 12px/1.5 var(--font,Geist,system-ui,sans-serif);white-space:nowrap}"
+    },
+    {
+      "name": "Status label",
+      "kind": "custom",
+      "refersTo": "status-danger",
+      "description": "Labelled semantic status from src/components/workspace/Status.tsx and src/index.css; static example, not a claim about the current project.",
+      "html": "<span class=\"ds-state-label\"><span class=\"ds-state-dot\" aria-hidden=\"true\"></span>Payment blocked</span>",
+      "css": ".ds-state-label{display:inline-flex;align-items:center;gap:6px;color:var(--red,#b43f43);font:400 12px/1.5 var(--font,Geist,system-ui,sans-serif);white-space:nowrap}.ds-state-dot{width:5px;height:5px;border-radius:50%;background:currentColor}"
+    },
+    {
+      "name": "Recovery sheet",
+      "kind": "card",
+      "refersTo": "recovery-panel",
+      "description": "Flat decision-panel shell from src/components/workspace/DeliveryOverview.tsx and src/index.css. Content excerpt shows the section heading and supporting-copy treatment.",
+      "html": "<aside class=\"ds-recovery-panel\"><div class=\"ds-section-heading\"><h2>Milestone readiness</h2></div><p class=\"ds-rail-description\">Review payment, materials, and predecessors before changing this milestone.</p></aside>",
+      "css": ".ds-recovery-panel{padding:22px;border:1px solid var(--line,#e3e6e8);border-radius:var(--radius,8px);background:var(--surface,#ffffff);color:var(--text,#202326);font:400 14px/1.5 var(--font,Geist,system-ui,sans-serif)}.ds-section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}.ds-section-heading h2{margin:0;font-size:16px;font-weight:500;letter-spacing:-.02em;text-wrap:balance}.ds-rail-description{margin:0;color:var(--text-muted,#626a72);font-size:13px;line-height:1.65}@media(max-width:640px){.ds-recovery-panel{padding:20px}.ds-section-heading{gap:12px;align-items:start;margin-bottom:18px}}"
+    },
+    {
+      "name": "Release chain",
+      "kind": "custom",
+      "refersTo": "release-chain",
+      "description": "ReleaseChain in src/components/workspace/DeliveryOverview.tsx, styled in src/index.css. Illustrative states demonstrate independent conditions, not current milestone data.",
+      "html": "<ol class=\"ds-release-chain\" aria-label=\"Example release conditions\"><li class=\"ds-chain-item ds-is-ready\"><span class=\"ds-chain-node\" aria-hidden=\"true\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span>Invoice</span><strong>Paid</strong></li><li class=\"ds-chain-item\"><span class=\"ds-chain-node\" aria-hidden=\"true\"><span class=\"ds-chain-dot\"></span></span><span>Materials</span><strong>Not staged</strong></li><li class=\"ds-chain-item\"><span class=\"ds-chain-node\" aria-hidden=\"true\"><span class=\"ds-chain-dot\"></span></span><span>Predecessors</span><strong>Unfinished</strong></li></ol>",
+      "css": ".ds-release-chain{display:grid;grid-template-columns:repeat(3,1fr);list-style:none;padding:0;margin:24px 0;color:var(--text,#202326);font:400 12px/1.5 var(--font,Geist,system-ui,sans-serif)}.ds-chain-item{position:relative;padding-top:28px;font-size:12px}.ds-chain-item:before{content:'';position:absolute;top:8px;left:0;right:0;height:1px;background:var(--line-strong,#b9c0c6)}.ds-chain-item:last-child:before{display:none}.ds-chain-node{position:absolute;top:0;left:0;display:flex;align-items:center;justify-content:center;height:17px;width:17px;border:1px solid var(--line-strong,#b9c0c6);border-radius:50%;background:var(--surface,#ffffff)}.ds-chain-dot{width:4px;height:4px;background:var(--text-muted,#626a72);border-radius:50%}.ds-is-ready .ds-chain-node{background:var(--primary,#24282c);color:var(--on-primary,#ffffff);border-color:var(--primary,#24282c)}.ds-chain-item strong{display:block;font-weight:400;color:var(--text-muted,#626a72);margin-top:3px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Delivery ledger",
+    "overview": "Drawing-register clarity defines the chosen world: cool paper, graphite text, ink controls, blue schedule marks, and restrained state signals. Compact Geist typography, aligned figures, and flat sheets keep milestone readiness and financial evidence readable together.\n\nThe primary workspaces use an open-plane shell and purposeful registers rather than nested decorative cards. Existing dialogs and embedded tools are brought into this world through compatibility styles and theme bridges; their retained utility markup is not the template for new workspace components.",
+    "keyCharacteristics": [
+      "Light-first surfaces with a persistent dark appearance.",
+      "Labelled navigation, compact controls, and fluid workspace gutters.",
+      "Tabular financial evidence and explicit status wording.",
+      "Flat panels with restrained borders; elevation reserved for overlays.",
+      "A three-part release chain for invoice, materials, and predecessors."
+    ],
+    "rules": [
+      { "name": "The State Has Words Rule", "body": "Pair semantic color with a visible state label; a colored dot or track is not the only explanation.", "section": "colors" },
+      { "name": "The Tabular Evidence Rule", "body": "Use Geist tabular numerals for money and align numeric table columns to the right; do not substitute a decorative mono face.", "section": "typography" },
+      { "name": "The Flat Sheet Rule", "body": "Use surface tone and borders for workspace hierarchy; reserve elevation for overlays.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** use the light/dark CSS-variable pairs from `src/index.css` for new workspace surfaces.",
+      "**Do** keep financial columns right-aligned with Geist tabular numerals.",
+      "**Do** pair state color with readable labels and keep invoice, materials, and predecessors distinct.",
+      "**Do** preserve the navigation fold, mobile register layout, visible focus, and reduced-motion behavior.",
+      "**Do** keep selected-milestone evidence visibly separate from the named recovery proposal."
+    ],
+    "donts": [
+      "**Don't** add gradients or decorative workspace shadows; reserve depth for overlays.",
+      "**Don't** promote legacy dialog utilities, FinOps palette entries, or third-party defaults into primary workspace tokens.",
+      "**Don't** make pending approval look like completed payment or release readiness.",
+      "**Don't** invent financial values, progress percentages, savings totals, or verification claims to fill the interface.",
+      "**Don't** show chart-only controls when the mobile schedule chart is hidden."
+    ]
+  }
+}

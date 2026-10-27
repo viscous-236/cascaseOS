@@ -147,12 +147,7 @@ export async function searchChannel3Products(
 export async function getChannel3ProductById(
   productId: string
 ): Promise<Channel3Product | null> {
-  try {
-    return await channel3Request<Channel3Product>('GET', `/products/${productId}`);
-  } catch (err) {
-    console.warn(`Channel3Service: Product lookup failed for ${productId}:`, err);
-    return null;
-  }
+  return channel3Request<Channel3Product>('GET', `/products/${productId}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -192,7 +187,8 @@ export async function searchAndAuditSupplierProducts(
 
   for (const product of searchResult.products) {
     const offer = product.offers?.[0];
-    const rawPrice = offer?.price?.price ?? 0;
+    const rawPrice = offer?.price?.price;
+    if (!offer || typeof rawPrice !== 'number' || !Number.isFinite(rawPrice) || rawPrice < 0) continue;
     const unitPriceMinor = Math.round(rawPrice * 100);
     const quantity = task.required_quantity > 0 ? task.required_quantity : 1;
     const totalMinor = unitPriceMinor * quantity;
@@ -242,6 +238,10 @@ export async function searchAndAuditSupplierProducts(
 
   // Sort discovered quotes ascending by unit price (best arbitrage first)
   quotes.sort((a, b) => a.unit_price_minor - b.unit_price_minor);
+
+  if (quotes.length === 0) {
+    throw new Error(`Channel3Service: live search returned no priced offers for "${query}"`);
+  }
 
   return quotes;
 }

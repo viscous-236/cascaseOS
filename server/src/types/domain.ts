@@ -131,6 +131,8 @@ export interface CascadeTask {
   schedule_status: ScheduleStatus;
   paypal_invoice_id: string | null;
   paypal_invoice_number: string | null;
+  /** Direct PayPal Sandbox recipient payment page URL */
+  paypal_invoice_view_url: string | null;
   paypal_invoice_status: PayPalInvoiceStatus;
   /** Full invoice total in integer minor units */
   invoice_total_minor: number;

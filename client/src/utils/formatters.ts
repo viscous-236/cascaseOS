@@ -16,6 +16,11 @@ export function formatMinorToUSD(minorUnits: number | null | undefined): string 
   }).format(dollars);
 }
 
+export function formatMinorToPayPalValue(minorUnits: number): string {
+  if (!Number.isInteger(minorUnits) || minorUnits < 0) throw new Error('PayPal amount must be a non-negative integer minor-unit value');
+  return (minorUnits / 100).toFixed(2);
+}
+
 export function formatVariancePct(pct: number | null | undefined): string {
   if (pct === null || pct === undefined || isNaN(pct)) {
     return '0.00%';

@@ -39,27 +39,16 @@ interface NodeData {
 export const FinOps3DTopology: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { state, selectedTaskId, selectTask } = useCascadeState();
+  const { state, selectedTaskId, selectTask, theme } = useCascadeState();
 
   const [hoveredTask, setHoveredTask] = useState<CascadeTask | null>(null);
-  const [isRotating, setIsRotating] = useState(true);
+  const [isRotating, setIsRotating] = useState(false);
 
   // Status-to-color mapping
   const getStatusColor = (status: ScheduleStatus): number => {
-    switch (status) {
-      case 'COMPLETED':
-        return 0x10b981; // emerald-500
-      case 'PAYMENT_BLOCKED':
-        return 0xf43f5e; // rose-500
-      case 'REROUTED_ACTIVE':
-        return 0x0ea5e9; // sky-500
-      case 'READY_TO_PROMOTE':
-        return 0xf59e0b; // amber-500
-      case 'MATERIALS_ORDERED':
-        return 0xa855f7; // purple-500
-      default:
-        return 0x64748b; // slate-500
-    }
+    const tokens = getComputedStyle(document.documentElement);
+    const token = status === 'PAYMENT_BLOCKED' ? '--red' : status === 'READY_TO_PROMOTE' ? '--amber' : status === 'REROUTED_ACTIVE' ? '--blue' : status === 'COMPLETED' ? '--green' : '--text-muted';
+    return new THREE.Color(tokens.getPropertyValue(token).trim()).getHex();
   };
 
   useEffect(() => {
@@ -72,7 +61,7 @@ export const FinOps3DTopology: React.FC = () => {
 
     // 1. Scene, Camera, Renderer
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x0b0f19, 0.035);
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
     camera.position.set(0, 1.5, 14);
@@ -90,11 +79,11 @@ export const FinOps3DTopology: React.FC = () => {
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0x38bdf8, 1.8);
+    const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight1.position.set(10, 15, 10);
     scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0x10b981, 1.2);
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
     dirLight2.position.set(-10, -5, 5);
     scene.add(dirLight2);
 
@@ -103,7 +92,8 @@ export const FinOps3DTopology: React.FC = () => {
     scene.add(pointLight);
 
     // 3. Grid Plane Background
-    const gridHelper = new THREE.GridHelper(30, 30, 0x1e293b, 0x0f172a);
+    const lineColor = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--line').trim()).getHex();
+    const gridHelper = new THREE.GridHelper(30, 15, lineColor, lineColor);
     gridHelper.position.y = -3;
     scene.add(gridHelper);
 
@@ -132,9 +122,9 @@ export const FinOps3DTopology: React.FC = () => {
       const mat = new THREE.MeshStandardMaterial({
         color: colorHex,
         emissive: colorHex,
-        emissiveIntensity: isSelected ? 0.8 : 0.35,
-        roughness: 0.2,
-        metalness: 0.8,
+        emissiveIntensity: 0,
+        roughness: 0.8,
+        metalness: 0.1,
       });
 
       const mesh = new THREE.Mesh(sphereGeo, mat);
@@ -273,7 +263,7 @@ export const FinOps3DTopology: React.FC = () => {
       camera.lookAt(0, 0, 0);
 
       // Subtle scene rotation
-      if (isRotating) {
+      if (isRotating && !reducedMotion) {
         nodeGroup.rotation.y = Math.sin(time * 0.25) * 0.12;
         pipeGroup.rotation.y = nodeGroup.rotation.y;
       }
@@ -283,10 +273,10 @@ export const FinOps3DTopology: React.FC = () => {
         entry.halo.lookAt(camera.position);
 
         // Pulse blocked or selected nodes
-        if (entry.status === 'PAYMENT_BLOCKED') {
+        if (isRotating && !reducedMotion && entry.status === 'PAYMENT_BLOCKED') {
           const scale = 1 + Math.sin(time * 5) * 0.12;
           entry.mesh.scale.set(scale, scale, scale);
-        } else if (entry.taskId === selectedTaskId) {
+        } else if (isRotating && !reducedMotion && entry.taskId === selectedTaskId) {
           const scale = 1 + Math.sin(time * 3) * 0.08;
           entry.mesh.scale.set(scale, scale, scale);
         }
@@ -294,7 +284,7 @@ export const FinOps3DTopology: React.FC = () => {
 
       // Animate cashflow/dependency particles along curves
       flowParticles.forEach((fp) => {
-        fp.progress = (fp.progress + delta * 0.4) % 1;
+        if (isRotating && !reducedMotion) fp.progress = (fp.progress + delta * 0.4) % 1;
         const pt = fp.curve.getPointAt(fp.progress);
         fp.particle.position.copy(pt);
       });
@@ -323,16 +313,23 @@ export const FinOps3DTopology: React.FC = () => {
       cancelAnimationFrame(animationFrameId);
       document.body.style.cursor = 'default';
       renderer.dispose();
+      scene.traverse((object) => {
+        if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
+          object.geometry.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material.dispose());
+        }
+      });
     };
-  }, [state?.tasks, state?.dependencies, selectedTaskId, selectTask, isRotating]);
+  }, [state?.tasks, state?.dependencies, selectedTaskId, selectTask, isRotating, theme]);
 
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-[340px] lg:h-[380px] bg-[#07090e] rounded-2xl border border-neutral-200 dark:border-white/[0.08] overflow-hidden flex flex-col shadow-sm"
+      className="topology-view relative w-full h-[340px] lg:h-[380px] overflow-hidden flex flex-col"
     >
       {/* 3D WebGL Canvas */}
-      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" aria-label="Spatial dependency graph. The relationship list below provides keyboard-accessible details." />
 
       {/* Top Overlay Controls */}
       <div className="absolute top-3 left-4 right-4 flex items-center justify-between pointer-events-none z-10">
@@ -346,6 +343,8 @@ export const FinOps3DTopology: React.FC = () => {
         <div className="flex items-center space-x-2 pointer-events-auto">
           <button
             onClick={() => setIsRotating((v) => !v)}
+            aria-label="Toggle dependency graph motion"
+            aria-pressed={isRotating}
             className={`p-1.5 rounded-lg border transition-colors ${
               isRotating
                 ? 'bg-neutral-800 text-white border-neutral-700'
