@@ -126,6 +126,7 @@ export const TimelinePane: React.FC = () => {
       }
     };
   }, []);
+  
 
   // Bryntum Column configurations with rich HTML renderers
   const columns = useMemo(() => [

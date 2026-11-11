@@ -365,6 +365,60 @@ describe('Phase 3: PayPal Sandbox Integration & Services', () => {
       expect(body.detail.memo).toBe('Partial materials unlock for Phase 2 hardware');
     });
 
+    it('updateInvoiceForPartialMaterialsUnlock: follows the self link returned by PayPal and returns the full invoice', async () => {
+      const currentInvoice: PayPalInvoice = {
+        id: 'INV2-PHASE-2',
+        status: 'SENT',
+        detail: { currency_code: 'USD', memo: 'Original Invoice' },
+        configuration: { allow_tip: false },
+      };
+      const updatedInvoice: PayPalInvoice = {
+        ...currentInvoice,
+        configuration: {
+          partial_payment: {
+            allow_partial_payment: true,
+            minimum_amount_due: { currency_code: 'USD', value: '1396.00' },
+          },
+        },
+      };
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'TOKEN', token_type: 'Bearer', expires_in: 3600 }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            rel: 'self',
+            href: 'https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-PHASE-2',
+            method: 'GET',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => updatedInvoice,
+        });
+      globalThis.fetch = mockFetch;
+
+      const updated = await updateInvoiceForPartialMaterialsUnlock(
+        'INV2-PHASE-2',
+        currentInvoice,
+        139600,
+        'USD',
+        'Partial materials unlock for Phase 2 hardware'
+      );
+
+      expect(updated.id).toBe('INV2-PHASE-2');
+      expect(updated.configuration?.partial_payment?.allow_partial_payment).toBe(true);
+      const [getUrl, getInit] = mockFetch.mock.calls[2] as [string, RequestInit];
+      expect(getUrl).toBe('https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-PHASE-2');
+      expect(getInit.method).toBe('GET');
+    });
+
     it('generateInvoiceQrCode: calls generate-qr-code and returns Base64 PNG (REQ-009)', async () => {
       const mockFetch = vi.fn()
         .mockResolvedValueOnce({
@@ -389,6 +443,40 @@ describe('Phase 3: PayPal Sandbox Integration & Services', () => {
       expect(body.width).toBe(300);
       expect(body.height).toBe(300);
       expect(body.action).toBe('pay');
+    });
+
+    it('generateInvoiceQrCode: parses the real multipart image response from PayPal', async () => {
+      const boundary = 'qr-test-boundary';
+      const multipartBody =
+        `--${boundary}\r\n` +
+        'Content-Disposition: form-data; name="image"\r\n' +
+        'Content-Type: text/plain\r\n' +
+        '\r\n' +
+        'iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACSElEQVR4Xu2XQW7dMA\r\n' +
+        `--${boundary}--\r\n`;
+
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({ access_token: 'TOKEN', token_type: 'Bearer', expires_in: 3600 }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': `multipart/form-data; boundary=${boundary}` }),
+          text: async () => multipartBody,
+        });
+      globalThis.fetch = mockFetch;
+
+      const qr = await generateInvoiceQrCode('INV2-PHASE-2');
+      expect(qr.qr_code_base64).toBe(
+        'iVBORw0KGgoAAAANSUhEUgAAASwAAAEsAQAAAABRBrPYAAACSElEQVR4Xu2XQW7dMA'
+      );
+
+      const [, init] = mockFetch.mock.calls[1] as [string, RequestInit];
+      const headers = init.headers as Record<string, string>;
+      expect(headers.Accept).toBe('*/*');
     });
 
     it('sendInvoiceReminder: sends remind request with subject and note', async () => {

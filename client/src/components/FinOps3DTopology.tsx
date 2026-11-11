@@ -118,6 +118,8 @@ export const FinOps3DTopology: React.FC = () => {
       const y = Math.sin((index / total) * Math.PI) * 1.5 - 0.5;
       const z = Math.cos((index / total) * Math.PI) * 1.8;
 
+      
+
       // Core Sphere
       const mat = new THREE.MeshStandardMaterial({
         color: colorHex,

@@ -131,6 +131,7 @@ router.post(
     let qrCodeBase64: string | null = blockedTask.qr_code_base64;
     let recipientViewUrl: string | null = blockedTask.paypal_invoice_view_url;
     let reminderSentAt: string | null = null;
+    let paypalSplitResponse: unknown = null;
     const paypalInvoiceId = blockedTask.paypal_invoice_id;
 
     if (paypalInvoiceId && /(?:FALLBACK|MOCK)/i.test(paypalInvoiceId)) {
@@ -154,7 +155,7 @@ router.post(
 
         // Update PayPal Sandbox invoice to enable partial payment with materials minimum
         paypalOperation = 'updateInvoiceForPartialMaterialsUnlock';
-        await updateInvoiceForPartialMaterialsUnlock(
+        paypalSplitResponse = await updateInvoiceForPartialMaterialsUnlock(
           paypalInvoiceId,
           currentInv,
           plan.immediate_unlock_minor,
@@ -242,7 +243,7 @@ router.post(
           transaction_record_id, project_id, task_id, plan_id, kind,
           paypal_resource_id, paypal_capture_id, status, currency, amount_minor,
           raw_response_json, created_at
-        ) VALUES (?, ?, ?, ?, 'INVOICE_SPLIT_UPDATE', ?, NULL, 'UPDATED', 'USD', ?, '{}', ?)`
+        ) VALUES (?, ?, ?, ?, 'INVOICE_SPLIT_UPDATE', ?, NULL, 'UPDATED', 'USD', ?, ?, ?)`
       ).run(
         randomUUID(),
         plan.project_id,
@@ -250,6 +251,7 @@ router.post(
         planId,
         paypalInvoiceId ?? 'INVOICE_SPLIT',
         plan.immediate_unlock_minor,
+        JSON.stringify(paypalSplitResponse ?? {}),
         now
       );
 

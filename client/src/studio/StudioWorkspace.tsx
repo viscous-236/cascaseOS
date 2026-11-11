@@ -10,11 +10,12 @@
  * - Light and Dark theme support
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { AgStudio } from 'ag-studio-react';
 import { studioTheme } from 'ag-studio';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import { cascadeCustomWidgets } from './widgets/createCascadeWidgets';
+import { createCascadeStudioAiConfig } from './agents/cascadeFinOpsAgent';
 import {
   LayoutDashboard,
   Edit3,
@@ -23,8 +24,22 @@ import {
 } from 'lucide-react';
 
 export const StudioWorkspace: React.FC = () => {
-  const { state, isRefreshing, refreshState, theme } = useCascadeState();
+  const { state, isRefreshing, refreshState, theme, activeProjectId } = useCascadeState();
   const [studioMode, setStudioMode] = useState<'edit' | 'view'>('edit');
+
+  // Studio reads `ai` once at initialisation, so the config stays stable while
+  // this ref keeps it pointed at the current project without remounting Studio.
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+
+  const studioAiConfig = useMemo(
+    () =>
+      createCascadeStudioAiConfig({
+        getProjectId: () => activeProjectIdRef.current,
+      }),
+    []
+  );
+
   const workspaceTheme = useMemo(() => {
     const dark = theme === 'dark';
     return studioTheme.withParams({
@@ -166,6 +181,7 @@ export const StudioWorkspace: React.FC = () => {
         <AgStudio
           data={studioData as any}
           widgets={cascadeCustomWidgets as any}
+          ai={studioAiConfig}
           mode={studioMode}
           theme={workspaceTheme}
           className="w-full h-full"

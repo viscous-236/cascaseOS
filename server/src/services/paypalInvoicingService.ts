@@ -17,7 +17,7 @@
  * APIMatic-validated payload structures are used throughout (ARC-006).
  */
 
-import { getPayPalAccessToken } from './paypalAuthService.js';
+import { getPayPalInvoicingAccessToken } from './paypalAuthService.js';
 import { formatMinorToPayPalValue } from '../utils/moneyAndHash.js';
 import { env } from '../config/env.js';
 
@@ -124,15 +124,17 @@ async function paypalRequest<T = unknown>(
     requestId?: string;
     body?: unknown;
     expectEmptyBody?: boolean;
+    accept?: string;
+    responseType?: 'json' | 'multipart-image';
   } = {}
 ): Promise<T> {
-  const token = await getPayPalAccessToken();
+  const token = await getPayPalInvoicingAccessToken();
   const url = `${env.PAYPAL_API_BASE_URL}${path}`;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
-    Accept: 'application/json',
+    Accept: options.accept ?? 'application/json',
     'PayPal-Partner-Attribution-Id': 'CascadeOS-Hackathon-2026',
   };
 
@@ -175,6 +177,10 @@ async function paypalRequest<T = unknown>(
     return {} as T;
   }
 
+  if (options.responseType === 'multipart-image') {
+    return (await parseQrCodeResponse(response, method, url)) as T;
+  }
+
   try {
     return (await response.json()) as T;
   } catch {
@@ -184,6 +190,71 @@ async function paypalRequest<T = unknown>(
   }
 }
 
+/**
+ * PayPal's QR endpoint returns either JSON (per docs) or a
+ * `multipart/form-data` part named "image" containing Base64 PNG data
+ * (observed live). Handle both and fail closed on an empty payload.
+ */
+async function parseQrCodeResponse(
+  response: Response,
+  method: string,
+  url: string
+): Promise<QrCodeResponse> {
+  const contentType = response.headers?.get?.('content-type') ?? '';
+
+  if (contentType.includes('multipart/form-data')) {
+    const payload = await response.text();
+    const base64 = extractMultipartImage(payload, contentType);
+    if (base64 === null) {
+      throw new Error(
+        `PayPalInvoicingService: QR response from [${method} ${url}] did not contain a Base64 image part`
+      );
+    }
+    return { qr_code_base64: base64 };
+  }
+
+  let payload: { qr_code_base64?: unknown; image?: unknown };
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    throw new Error(
+      `PayPalInvoicingService: failed to parse QR response from [${method} ${url}]`
+    );
+  }
+
+  const base64 = payload.qr_code_base64 ?? payload.image;
+  if (typeof base64 !== 'string' || base64.length === 0) {
+    throw new Error(
+      `PayPalInvoicingService: QR response from [${method} ${url}] did not include Base64 image data`
+    );
+  }
+  return { qr_code_base64: base64 };
+}
+
+function extractMultipartImage(payload: string, contentType: string): string | null {
+  const boundaryMatch = contentType.match(/boundary="?([^";]+)"?/i);
+  if (boundaryMatch === null || boundaryMatch[1] === undefined) {
+    return null;
+  }
+
+  const boundary = boundaryMatch[1];
+  for (const part of payload.split(`--${boundary}`)) {
+    if (!/name="image"/i.test(part)) {
+      continue;
+    }
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd === -1) {
+      continue;
+    }
+    const base64 = part
+      .slice(headerEnd + 4)
+      .replace(/\r\n$/, '')
+      .replace(/\s+/g, '');
+    return base64.length > 0 ? base64 : null;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // 1. Create Draft Invoice
 // ---------------------------------------------------------------------------
@@ -191,6 +262,10 @@ async function paypalRequest<T = unknown>(
 /**
  * Creates a draft PayPal Sandbox invoice.
  * Returns the full invoice object containing the real sandbox invoice_id.
+ *
+ * PayPal answers `POST /v2/invoicing/invoices` with 201 Created and a
+ * self-link object (`{ rel, href, method }`) rather than an invoice. In that
+ * case we extract the invoice ID from the link and GET the full invoice.
  * (REQ-004, ARC-006, SEC-004)
  */
 export async function createDraftInvoice(
@@ -232,10 +307,50 @@ export async function createDraftInvoice(
     },
   };
 
-  return paypalRequest<PayPalInvoice>('POST', '/v2/invoicing/invoices', {
-    requestId: params.requestId,
-    body: payload,
-  });
+  const created = await paypalRequest<PayPalInvoice | PayPalInvoiceLink>(
+    'POST',
+    '/v2/invoicing/invoices',
+    {
+      requestId: params.requestId,
+      body: payload,
+    }
+  );
+
+  if (typeof (created as PayPalInvoice).id === 'string' && (created as PayPalInvoice).id.length > 0) {
+    return created as PayPalInvoice;
+  }
+
+  const invoiceId = extractInvoiceIdFromLink(
+    (created as PayPalInvoiceLink).href
+  );
+  if (invoiceId === null) {
+    throw new Error(
+      'PayPalInvoicingService: create invoice response did not include an invoice ID or a self link'
+    );
+  }
+
+  // Follow the self link so callers always receive the full invoice.
+  return getInvoice(invoiceId);
+}
+
+interface PayPalInvoiceLink {
+  rel?: string;
+  href?: string;
+  method?: string;
+}
+
+/** Extracts `INV2-...` from a PayPal self link such as
+ * `https://api.sandbox.paypal.com/v2/invoicing/invoices/INV2-XXXX-...`. */
+function extractInvoiceIdFromLink(href: unknown): string | null {
+  if (typeof href !== 'string') {
+    return null;
+  }
+  const match = href.match(/\/v2\/invoicing\/invoices\/([^/?#]+)/);
+  if (match === null || match[1] === undefined) {
+    return null;
+  }
+  const invoiceId = decodeURIComponent(match[1]);
+  return invoiceId.length > 0 ? invoiceId : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +446,7 @@ export async function updateInvoiceForPartialMaterialsUnlock(
     },
   };
 
-  return paypalRequest<PayPalInvoice>(
+  const updated = await paypalRequest<PayPalInvoice | PayPalInvoiceLink>(
     'PUT',
     `/v2/invoicing/invoices/${invoiceId}`,
     {
@@ -339,6 +454,15 @@ export async function updateInvoiceForPartialMaterialsUnlock(
       body: updatedPayload,
     }
   );
+
+  if (typeof (updated as PayPalInvoice).id === 'string' && (updated as PayPalInvoice).id.length > 0) {
+    return updated as PayPalInvoice;
+  }
+
+  // PayPal's live PUT response is a `self` link, not the invoice object.
+  const linkedInvoiceId =
+    extractInvoiceIdFromLink((updated as PayPalInvoiceLink).href) ?? invoiceId;
+  return getInvoice(linkedInvoiceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +492,10 @@ export async function generateInvoiceQrCode(
     {
       requestId: `cascade-qr-${invoiceId}`,
       body: { width: 300, height: 300, action: 'pay' },
+      // PayPal returns 406 for application/json on this endpoint; `*/*`
+      // yields the documented Base64 image (live: multipart/form-data).
+      accept: '*/*',
+      responseType: 'multipart-image',
     }
   );
 }

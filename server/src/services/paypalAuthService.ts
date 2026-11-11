@@ -6,10 +6,16 @@
  * - REQ-003: Authenticate against POST /v1/oauth2/token with Basic Auth
  * - SEC-008: Never log or expose the bearer token or credentials
  *
+ * PayPal does not include every enabled app feature in the default
+ * `client_credentials` scope list. Invoicing must be requested explicitly,
+ * otherwise `/v2/invoicing/*` returns NOT_AUTHORIZED even when the feature is
+ * enabled on the app.
+ *
  * Token caching strategy:
- * - Cache token in module-scoped variable after first fetch
+ * - Cache tokens in module-scoped state after the first fetch
  * - Refresh automatically when remaining TTL <= 60 seconds
- * - Thread-safe via a shared promise (no duplicate concurrent fetches)
+ * - Thread-safe via a shared promise per scope (no duplicate concurrent fetches)
+ * - Keep the default and Invoicing-scoped tokens in separate caches
  */
 
 import { env } from '../config/env.js';
@@ -25,74 +31,113 @@ interface PayPalTokenResponse {
   scope: string;
 }
 
+interface CachedToken {
+  token: string;
+  expiresAtMs: number;
+}
+
+interface FreshToken {
+  accessToken: string;
+  expiresAtMs: number;
+}
+
 // ---------------------------------------------------------------------------
-// Module-scoped cache (never exported — SEC-008)
+// Scope constants
 // ---------------------------------------------------------------------------
 
-let _cachedToken: string | null = null;
-/** Absolute epoch-ms when the cached token expires */
-let _tokenExpiresAtMs = 0;
-/** In-flight request guard — prevents concurrent duplicate fetches */
-let _fetchInFlight: Promise<string> | null = null;
+export const PAYPAL_INVOICING_SCOPE = 'https://uri.paypal.com/services/invoicing';
+
+const DEFAULT_TOKEN_CACHE_KEY = 'default';
+
+// ---------------------------------------------------------------------------
+// Module-scoped caches (never exported — SEC-008)
+// ---------------------------------------------------------------------------
+
+const _tokenCache = new Map<string, CachedToken>();
+const _fetchInFlight = new Map<string, Promise<string>>();
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a valid PayPal Sandbox OAuth2 Bearer token.
+ * Returns a valid PayPal Sandbox OAuth2 Bearer token for the app's default
+ * scope set (Orders, Payouts, Webhooks, etc.).
  *
  * Fetches a fresh token if the cache is empty or within 60 seconds of expiry.
  * Concurrent callers receive the same in-flight Promise to avoid duplicate
  * network requests.
  */
 export async function getPayPalAccessToken(): Promise<string> {
-  const nowMs = Date.now();
-  const earlyRefreshThresholdMs = 60 * 1000; // 60 seconds
-
-  // Return cached token if still valid with headroom
-  if (_cachedToken !== null && nowMs < _tokenExpiresAtMs - earlyRefreshThresholdMs) {
-    return _cachedToken;
-  }
-
-  // If a fetch is already in flight, wait for it
-  if (_fetchInFlight !== null) {
-    return _fetchInFlight;
-  }
-
-  // Start a new fetch and cache the promise
-  _fetchInFlight = _fetchFreshToken().finally(() => {
-    _fetchInFlight = null;
-  });
-
-  return _fetchInFlight;
+  return _getToken(DEFAULT_TOKEN_CACHE_KEY);
 }
 
 /**
- * Clears the cached token. Useful in tests or after credential rotation.
- * Does NOT revoke the token at PayPal.
+ * Returns a PayPal Sandbox OAuth2 Bearer token that explicitly includes the
+ * Invoicing scope. Use this for every `/v2/invoicing/*` request.
+ */
+export async function getPayPalInvoicingAccessToken(): Promise<string> {
+  return _getToken(PAYPAL_INVOICING_SCOPE, PAYPAL_INVOICING_SCOPE);
+}
+
+/**
+ * Clears all cached tokens. Useful in tests or after credential rotation.
+ * Does NOT revoke the tokens at PayPal.
  */
 export function clearPayPalTokenCache(): void {
-  _cachedToken = null;
-  _tokenExpiresAtMs = 0;
-  _fetchInFlight = null;
+  _tokenCache.clear();
+  _fetchInFlight.clear();
 }
 
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------
 
+async function _getToken(cacheKey: string, scope?: string): Promise<string> {
+  const nowMs = Date.now();
+  const earlyRefreshThresholdMs = 60 * 1000; // 60 seconds
+
+  const cached = _tokenCache.get(cacheKey);
+  if (cached !== undefined && nowMs < cached.expiresAtMs - earlyRefreshThresholdMs) {
+    return cached.token;
+  }
+
+  // If a fetch is already in flight for this scope, wait for it
+  const inFlight = _fetchInFlight.get(cacheKey);
+  if (inFlight !== undefined) {
+    return inFlight;
+  }
+
+  const pending = _fetchFreshToken(scope)
+    .then(({ accessToken, expiresAtMs }) => {
+      _tokenCache.set(cacheKey, { token: accessToken, expiresAtMs });
+      return accessToken;
+    })
+    .finally(() => {
+      _fetchInFlight.delete(cacheKey);
+    });
+
+  _fetchInFlight.set(cacheKey, pending);
+  return pending;
+}
+
 /**
  * Executes the live OAuth2 token exchange against PayPal Sandbox.
- * Stores the result in module-scoped cache variables.
+ * When a scope is supplied, it is explicitly requested; otherwise PayPal
+ * returns the app's default scope set.
  */
-async function _fetchFreshToken(): Promise<string> {
+async function _fetchFreshToken(scope?: string): Promise<FreshToken> {
   const tokenUrl = `${env.PAYPAL_API_BASE_URL}/v1/oauth2/token`;
 
   // HTTP Basic Auth: base64(clientId:clientSecret) per PayPal spec
   const credentials = Buffer.from(
     `${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`
   ).toString('base64');
+
+  const body = new URLSearchParams({ grant_type: 'client_credentials' });
+  if (scope !== undefined) {
+    body.set('scope', scope);
+  }
 
   let response: Response;
   try {
@@ -103,7 +148,7 @@ async function _fetchFreshToken(): Promise<string> {
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json',
       },
-      body: 'grant_type=client_credentials',
+      body: body.toString(),
     });
   } catch (networkError) {
     throw new Error(
@@ -131,14 +176,14 @@ async function _fetchFreshToken(): Promise<string> {
     );
   }
 
-  // Cache the token — log only the status, never the token value (SEC-008)
-  _cachedToken = payload.access_token;
-  _tokenExpiresAtMs = Date.now() + payload.expires_in * 1000;
+  const expiresAtMs = Date.now() + payload.expires_in * 1000;
 
+  // Log only lifecycle metadata, never the token value (SEC-008)
   console.log(
-    `[PayPalAuth] Token refreshed. Expires in ${payload.expires_in}s. ` +
-      `Cache valid until ${new Date(_tokenExpiresAtMs).toISOString()}`
+    `[PayPalAuth] Token refreshed${scope !== undefined ? ` (${scope})` : ''}. ` +
+      `Expires in ${payload.expires_in}s. ` +
+      `Cache valid until ${new Date(expiresAtMs).toISOString()}`
   );
 
-  return _cachedToken;
+  return { accessToken: payload.access_token, expiresAtMs };
 }

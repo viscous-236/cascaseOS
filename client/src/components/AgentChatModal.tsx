@@ -106,6 +106,7 @@ export const AgentChatModal: React.FC = () => {
         throw new Error(`Agent API returned ${res.status}`);
       }
 
+      
       const data = await res.json();
 
       const assistantMessage: ChatMessage = {

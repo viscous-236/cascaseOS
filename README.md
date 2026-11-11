@@ -3,7 +3,7 @@
 > **PayPal AI Hackathon 2026** — Multi-Tenant Autonomous Milestone FinOps, AI Schedule Architect, Channel3 Product Graph Arbitrage, Interactive Bryntum Gantt 7.3 & AG Studio 3.0 Analytics.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests: 149/149 Passing](https://img.shields.io/badge/Tests-149%2F149%20Passing%20(100%25)-emerald.svg)](#10-automated-test-verification)
+[![Tests: 165/165 Passing](https://img.shields.io/badge/Tests-165%2F165%20Passing%20(100%25)-emerald.svg)](#10-automated-test-verification)
 [![Zero-Mock Production Sandbox](https://img.shields.io/badge/PayPal%20Sandbox-Verified%20Live-emerald.svg)](https://developer.paypal.com)
 [![Channel3 Product Graph](https://img.shields.io/badge/Channel3-Live%20Graph%20API-sky.svg)](https://trychannel3.com)
 [![AG Studio 3.0](https://img.shields.io/badge/AG%20Studio-3.0%20Custom%20Widgets-purple.svg)](https://www.ag-grid.com/studio/)
@@ -242,6 +242,8 @@ PAYPAL_ENV=sandbox
 PAYPAL_CLIENT_ID=your_paypal_sandbox_client_id
 PAYPAL_CLIENT_SECRET=your_paypal_sandbox_client_secret
 PAYPAL_WEBHOOK_ID=
+PAYPAL_SANDBOX_MERCHANT_EMAIL=sb-merchant@business.example.com
+PAYPAL_SANDBOX_BUYER_EMAIL=sb-buyer@personal.example.com
 
 # Channel3 API
 CHANNEL3_API_KEY=your_channel3_api_key
@@ -255,6 +257,8 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 # Frontend Vite
 VITE_PAYPAL_CLIENT_ID=your_paypal_sandbox_client_id
 ```
+
+> **Live partial-payment prerequisite:** PayPal only enables Invoicing partial payments for merchants in supported countries. Bind the REST app to a **US Business sandbox account** and set `PAYPAL_SANDBOX_MERCHANT_EMAIL` to that account's email. An India merchant can create/send invoices and generate QR codes, but PayPal rejects `partial_payment` with `Partial payments are not available in your country`. `PAYPAL_SANDBOX_BUYER_EMAIL` may be an unregistered guest email, which avoids recipient-country invoice restrictions.
 
 ---
 
@@ -285,7 +289,7 @@ npm start
 ```
 Open your browser to: **[http://localhost:4000](http://localhost:4000)**
 
-### Method 3: Automated Test Suite (149 Tests)
+### Method 3: Automated Test Suite (165 Tests)
 Run the full Vitest suite covering all engines, cycle detectors, database repositories, PayPal integrations, and REST endpoints:
 ```bash
 npm test
@@ -295,11 +299,13 @@ Or directly via Vitest:
 npx vitest run
 ```
 
-### Method 4: Live Sandbox Smoke Test
-Directly tests genuine network requests against PayPal Sandbox and Channel3 API:
+### Method 4: Live Sandbox Verification (Fail-Closed)
+Directly exercises genuine network requests against PayPal Sandbox and Channel3 API:
 ```bash
 npm run verify:sandbox
 ```
+
+The verifier fails on any fallback/mock invoice ID, missing price, empty QR payload, or swallowed error. It verifies the complete PayPal Invoicing lifecycle — OAuth2 → create → send → enable the `$1,396.00` partial-payment minimum → generate QR → send reminder → confirm `SENT` status, partial-payment config, and recipient view URL — plus PayPal Orders v2 order creation and a priced Channel3 `/v0/search` result.
 
 ---
 
@@ -379,30 +385,34 @@ cascadeOS/
 
 ## 10. Automated Test Verification
 
-All **149/149 tests** pass with zero errors:
+All **165/165 tests** pass with zero errors:
 
 ```text
  ✓ server/src/engine/__tests__/engine.test.ts (43)
  ✓ server/src/engine/__tests__/dagValidator.test.ts (6)
  ✓ server/src/__tests__/phase1.test.ts (48)
- ✓ server/src/__tests__/phase3.test.ts (24)
+ ✓ server/src/__tests__/phase3.test.ts (26)
  ✓ server/src/__tests__/phase4.test.ts (6)
  ✓ server/src/__tests__/channel3Service.test.ts (4)
  ✓ server/src/__tests__/dynamicProjectsIntegration.test.ts (6)
  ✓ server/src/__tests__/apiIntegration.test.ts (12)
+ ✓ server/src/__tests__/paypalAuthScopes.test.ts (6)
+ ✓ server/src/__tests__/verifyLiveSandbox.test.ts (8)
 
- Test Files  8 passed (8)
-      Tests  149 passed (149)
+ Test Files  10 passed (10)
+      Tests  165 passed (165)
 ```
 
 - **`dagValidator.test.ts`**: Kahn's in-degree topological sort, cycle detection gate (`SEC-101`), linear DAGs, parallel DAGs, and disconnected components.
 - **`dynamicProjectsIntegration.test.ts`**: `GET /api/projects` KPI summaries, `POST /api/projects/create-custom` with live Kahn cycle verification, task schedule updating, dependency CRUD, and on-demand PayPal/Channel3 provisioning.
 - **`engine.test.ts`**: Minor-unit currency conversions, canonical RFC 6960 SHA-256 fingerprint determinism, blast radius calculations, and all 10 policy invariants.
 - **`phase1.test.ts`**: SQLite WAL mode, foreign key constraints, table schemas, and append-only triggers on `audit_events`.
-- **`phase3.test.ts`**: PayPal OAuth2 token refresh, Invoicing v2 draft, partial payment thresholds, QR generation, Orders v2 creation, and webhook signature verification.
+- **`phase3.test.ts`**: PayPal OAuth2 token refresh, Invoicing v2 draft/create-link handling, partial-payment updates with self-link resolution, multipart QR parsing, Orders v2 creation, and webhook signature verification.
 - **`channel3Service.test.ts`**: Live product search, SKU quote normalization, caching, and variance percentage computation.
 - **`phase4.test.ts`**: Project seeder and Groq OSS 120B empathetic nudge generator.
 - **`apiIntegration.test.ts`**: End-to-end REST API integration testing all scenario triggers, state synchronization, approval workflows, and studio copilot chat.
+- **`paypalAuthScopes.test.ts`**: Explicit `invoicing` scope token acquisition, scoped-token cache isolation, and draft-invoice self-link handling.
+- **`verifyLiveSandbox.test.ts`**: Fail-closed live-verifier coverage for invoice create/send, partial payment, QR, reminder, fallback IDs, Orders, and Channel3 pricing.
 
 ---
 
