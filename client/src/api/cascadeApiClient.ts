@@ -239,12 +239,13 @@ export const cascadeApiClient = {
     taskId: string;
     quoteId: string;
     approvedFingerprint: string;
+    expectedTotalMinor?: number;
   }): Promise<{
     success: boolean;
-    orderId: string;
+    paypalOrderId: string;
     status: string;
-    approveUrl: string | null;
-    transactionRecord: any;
+    totalMinor: number;
+    currency: string;
   }> {
     return request('/paypal/orders/create', {
       method: 'POST',
@@ -263,10 +264,10 @@ export const cascadeApiClient = {
     success: boolean;
     orderId: string;
     captureId: string;
-    status: string;
-    task: any;
+    status: 'COMPLETED';
+    task: CascadeTask;
   }> {
-    return request(`/paypal/orders/${orderId}/capture`, {
+    return request(`/paypal/orders/${encodeURIComponent(orderId)}/capture`, {
       method: 'POST',
       body: JSON.stringify(params),
     });

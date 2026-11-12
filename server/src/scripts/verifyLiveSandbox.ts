@@ -16,7 +16,10 @@
  */
 
 import { pathToFileURL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
+import { getDb } from '../db/database.js';
+import { APEX_PROJECT_ID } from '../services/projectBootstrapService.js';
 import { formatMinorToPayPalValue } from '../utils/moneyAndHash.js';
 import { getPayPalAccessToken } from '../services/paypalAuthService.js';
 import {
@@ -39,6 +42,7 @@ import {
   searchChannel3Products,
   type Channel3SearchResponse,
 } from '../services/channel3Service.js';
+import { redactSecrets } from '../utils/redaction.js';
 
 export interface LiveSandboxVerifierDeps {
   getPayPalAccessToken: () => Promise<string>;
@@ -56,6 +60,29 @@ export interface LiveSandboxVerifierDeps {
   sendInvoiceReminder: (invoiceId: string, subject: string, note: string) => Promise<void>;
   createSupplierOrder: (params: CreateOrderParams) => Promise<PayPalOrderDetails>;
   searchChannel3Products: (query: string) => Promise<Channel3SearchResponse>;
+  /** Persists the live order into `paypal_transactions` (TEST-011). */
+  persistOrder: (input: PersistLiveOrderInput) => void;
+  /** Persists the normalized product into `supplier_quotes` (TEST-012). */
+  persistQuote: (input: PersistLiveQuoteInput) => void;
+}
+
+export interface PersistLiveOrderInput {
+  orderId: string;
+  status: string;
+  amountMinor: number;
+  currency: string;
+  rawResponse: PayPalOrderDetails;
+}
+
+export interface PersistLiveQuoteInput {
+  externalProductId: string;
+  productTitle: string;
+  merchantName: string;
+  unitPriceMinor: number;
+  currency: string;
+  totalMinor: number;
+  availabilityStatus: string;
+  rawProduct: Channel3SearchResponse['products'][number];
 }
 
 export interface LiveSandboxVerificationReport {
@@ -69,10 +96,12 @@ export interface LiveSandboxVerificationReport {
   reminderSent: boolean;
   orderId: string;
   orderStatus: string;
+  orderPersisted: boolean;
   channel3ProductCount: number;
   channel3ProductTitle: string;
   channel3Merchant: string;
   channel3Price: number;
+  quotePersisted: boolean;
 }
 
 type VerificationLogger = (message: string) => void;
@@ -118,7 +147,7 @@ export async function runLiveSandboxVerification(
   if (!token) {
     throw new Error('PayPal OAuth2 verification failed: empty access token');
   }
-  log(`   ✓ PayPal Sandbox Token acquired (${token.slice(0, 16)}...)\n`);
+  log('   ✓ PayPal Sandbox Token acquired (redacted)\n');
 
   // 2. PayPal Invoicing v2 Full Lifecycle
   log('[2/4] Testing full invoice lifecycle on api-m.sandbox.paypal.com...');
@@ -251,11 +280,28 @@ export async function runLiveSandboxVerification(
   } catch (error) {
     throw new Error(`PayPal order verification failed: ${String(error)}`);
   }
-  if (!order.id) {
-    throw new Error('PayPal order verification failed: missing order ID');
+  if (!order.id || !/^[A-Z0-9]{10,}$/i.test(order.id)) {
+    throw new Error('PayPal order verification failed: missing a genuine PayPal order ID');
+  }
+  if (order.status !== 'CREATED') {
+    throw new Error(
+      `PayPal order verification failed: expected CREATED status, received '${order.status}'`
+    );
+  }
+
+  try {
+    deps.persistOrder({
+      orderId: order.id,
+      status: order.status,
+      amountMinor: 139600,
+      currency: 'USD',
+      rawResponse: order,
+    });
+  } catch (error) {
+    throw new Error(`PayPal order persistence failed: ${String(error)}`);
   }
   log(`   ✓ PayPal Order Created: ${order.id}`);
-  log(`   ✓ Order Status: ${order.status}\n`);
+  log(`   ✓ Order Status: ${order.status} (persisted in paypal_transactions)\n`);
 
   // 4. Channel3 Product Search
   log('[4/4] Querying Channel3 Catalog API (/v0/search)...');
@@ -276,7 +322,36 @@ export async function runLiveSandboxVerification(
 
   log(`   ✓ Channel3 Search successful. Found ${products.length} products.`);
   log(`   ✓ Sample Product: "${priced.product.title}" by ${priced.merchant}`);
-  log(`   ✓ Price: $${priced.price.toFixed(2)}\n`);
+  log(`   ✓ Price: $${priced.price.toFixed(2)}`);
+
+  const externalProductId = priced.product.id;
+  if (typeof externalProductId !== 'string' || externalProductId.trim().length === 0) {
+    throw new Error(
+      'Channel3 verification failed: priced product is missing a genuine external product ID'
+    );
+  }
+  const unitPriceMinor = Math.round(priced.price * 100);
+  if (!Number.isInteger(unitPriceMinor) || unitPriceMinor <= 0) {
+    throw new Error(
+      `Channel3 verification failed: price '${priced.price}' did not normalize to positive integer minor units`
+    );
+  }
+  const offer = priced.product.offers?.[0];
+  try {
+    deps.persistQuote({
+      externalProductId,
+      productTitle: priced.product.title,
+      merchantName: priced.merchant,
+      unitPriceMinor,
+      currency: offer?.price.currency ?? 'USD',
+      totalMinor: unitPriceMinor,
+      availabilityStatus: offer?.availability ?? 'InStock',
+      rawProduct: priced.product,
+    });
+  } catch (error) {
+    throw new Error(`Channel3 quote persistence failed: ${String(error)}`);
+  }
+  log(`   ✓ Quote Persisted: ${externalProductId} (${unitPriceMinor} minor units)\n`);
 
   log('=============================================================');
   log(' SUCCESS: All Live Sandbox Integrations Verified!');
@@ -295,11 +370,63 @@ export async function runLiveSandboxVerification(
     reminderSent: true,
     orderId: order.id,
     orderStatus: order.status,
+    orderPersisted: true,
     channel3ProductCount: products.length,
     channel3ProductTitle: priced.product.title,
     channel3Merchant: priced.merchant,
     channel3Price: priced.price,
+    quotePersisted: true,
   };
+}
+
+/** Writes the live order into `paypal_transactions` (TEST-011). */
+export function persistLiveOrderToDb(input: PersistLiveOrderInput): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      `INSERT INTO paypal_transactions (
+        transaction_record_id, project_id, task_id, plan_id, kind,
+        paypal_resource_id, paypal_capture_id, status, currency, amount_minor,
+        raw_response_json, created_at
+      ) VALUES (?, ?, ?, NULL, 'ORDER_CREATE', ?, NULL, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      randomUUID(),
+      APEX_PROJECT_ID,
+      'task_phase_2_displays',
+      input.orderId,
+      input.status,
+      input.currency,
+      input.amountMinor,
+      JSON.stringify(input.rawResponse),
+      now
+    );
+}
+
+/** Writes the normalized Channel3 product into `supplier_quotes` (TEST-012). */
+export function persistLiveQuoteToDb(input: PersistLiveQuoteInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO supplier_quotes (
+        quote_id, task_id, source_type, external_product_id, product_title,
+        merchant_name, product_url, image_url, currency, unit_price_minor,
+        quantity, shipping_minor, tax_minor, total_minor,
+        variance_vs_historical_pct, savings_vs_incumbent_minor,
+        availability_status, observed_at
+      ) VALUES (?, ?, 'CHANNEL3_LIVE', ?, ?, ?, NULL, NULL, ?, ?, 1, 0, 0, ?, 0, 0, ?, ?)`
+    )
+    .run(
+      randomUUID(),
+      'task_phase_2_displays',
+      input.externalProductId,
+      input.productTitle,
+      input.merchantName,
+      input.currency,
+      input.unitPriceMinor,
+      input.totalMinor,
+      input.availabilityStatus,
+      new Date().toISOString()
+    );
 }
 
 async function main(): Promise<void> {
@@ -314,10 +441,12 @@ async function main(): Promise<void> {
       sendInvoiceReminder,
       createSupplierOrder,
       searchChannel3Products,
+      persistOrder: persistLiveOrderToDb,
+      persistQuote: persistLiveQuoteToDb,
     });
     process.exit(0);
   } catch (error) {
-    console.error('\n❌ Smoke Test Error:', error);
+    console.error('\n❌ Smoke Test Error:', redactSecrets(String(error)));
     process.exit(1);
   }
 }

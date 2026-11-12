@@ -67,6 +67,8 @@ interface CascadeStateContextType {
   updateTaskSchedule: (taskId: string, patch: UpsertTaskPayload) => Promise<boolean>;
   addNewTaskPhase: (task: UpsertTaskPayload) => Promise<boolean>;
   provisionTaskFinancials: (taskId: string) => Promise<boolean>;
+  createDependency: (fromTaskId: string, toTaskId: string, lagDays?: number) => Promise<boolean>;
+  deleteDependency: (dependencyId: string) => Promise<boolean>;
 
   checkHealth: () => Promise<void>;
   bootstrapProject: (forceReset?: boolean) => Promise<void>;
@@ -77,7 +79,27 @@ interface CascadeStateContextType {
   closeApprovalModal: () => void;
   setIsAuditDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   setIsAgentChatOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
-  approvePlan: (approverActor: string, customNote?: string) => Promise<boolean>;
+  approvePlan: (approverActor: string, customNote?: string, options?: { closeModal?: boolean }) => Promise<boolean>;
+  createSupplierOrder: (params: {
+    planId: string;
+    taskId: string;
+    quoteId: string;
+    approvedFingerprint: string;
+    expectedTotalMinor?: number;
+  }) => Promise<{
+    success: boolean;
+    paypalOrderId: string;
+    status: string;
+    totalMinor: number;
+    currency: string;
+  }>;
+  captureSupplierOrder: (orderId: string, taskId: string, planId?: string) => Promise<{
+    success: boolean;
+    orderId: string;
+    captureId: string;
+    status: 'COMPLETED';
+    task: CascadeTask;
+  }>;
   lastNotification: {
     invoiceId: string | null;
     minimumAmountDueMinor: number;
@@ -439,6 +461,53 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
     [activeProjectId, refreshState, fetchProjects]
   );
 
+  const createDependency = useCallback(
+    async (fromTaskId: string, toTaskId: string, lagDays = 0): Promise<boolean> => {
+      try {
+        const res = await cascadeApiClient.createDependency(activeProjectId, {
+          from_task_id: fromTaskId,
+          to_task_id: toTaskId,
+          lag_days: lagDays,
+        });
+        if (res.success) {
+          await refreshState(true);
+          toast.success('Dependency linked', {
+            description: `${fromTaskId} -> ${toTaskId}`,
+            duration: 2000,
+          });
+          return true;
+        }
+        return false;
+      } catch (err: any) {
+        const msg = err?.errorData?.error || err?.message || String(err);
+        toast.error('Dependency linking failed', {
+          description: msg,
+        });
+        return false;
+      }
+    },
+    [activeProjectId, refreshState]
+  );
+
+  const deleteDependency = useCallback(
+    async (dependencyId: string): Promise<boolean> => {
+      try {
+        const res = await cascadeApiClient.deleteDependency(activeProjectId, dependencyId);
+        if (res.success) {
+          await refreshState(true);
+          toast.success('Dependency removed', { duration: 2000 });
+          return true;
+        }
+        return false;
+      } catch (err: any) {
+        const msg = err?.errorData?.error || err?.message || String(err);
+        toast.error('Failed to remove dependency', { description: msg });
+        return false;
+      }
+    },
+    [activeProjectId, refreshState]
+  );
+
   const triggerScenario = useCallback(
     async (scenarioId: 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C') => {
       setIsRefreshing(true);
@@ -519,7 +588,11 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const approvePlan = useCallback(
-    async (approverActor: string, customNote?: string): Promise<boolean> => {
+    async (
+      approverActor: string,
+      customNote?: string,
+      options?: { closeModal?: boolean }
+    ): Promise<boolean> => {
       if (!activePlan) {
         toast.error('No active recovery plan selected for approval');
         return false;
@@ -545,7 +618,9 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
           nudgeMessage: res.nudgeMessage,
         });
         await refreshState(true);
-        closeApprovalModal();
+        if (options?.closeModal !== false) {
+          closeApprovalModal();
+        }
 
         toast.success('Recovery Plan Approved & Schedule Rerouted!', {
           id: toastId,
@@ -570,6 +645,28 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
       }
     },
     [activePlan, refreshState, closeApprovalModal]
+  );
+
+  const createSupplierOrder = useCallback(
+    async (params: {
+      planId: string;
+      taskId: string;
+      quoteId: string;
+      approvedFingerprint: string;
+      expectedTotalMinor?: number;
+    }) => {
+      return cascadeApiClient.createPayPalSupplierOrder(params);
+    },
+    []
+  );
+
+  const captureSupplierOrder = useCallback(
+    async (orderId: string, taskId: string, planId?: string) => {
+      const res = await cascadeApiClient.capturePayPalSupplierOrder(orderId, { taskId, planId });
+      await refreshState(true);
+      return res;
+    },
+    [refreshState]
   );
 
   return (
@@ -605,6 +702,8 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         updateTaskSchedule,
         addNewTaskPhase,
         provisionTaskFinancials,
+        createDependency,
+        deleteDependency,
         lastNotification,
         checkHealth,
         bootstrapProject,
@@ -616,6 +715,8 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         setIsAuditDrawerOpen,
         setIsAgentChatOpen,
         approvePlan,
+        createSupplierOrder,
+        captureSupplierOrder,
         toggleTheme,
       }}
     >

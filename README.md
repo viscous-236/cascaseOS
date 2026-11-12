@@ -220,7 +220,7 @@ See [`client/PRODUCT.md`](client/PRODUCT.md) for confirmed product context and [
 
 ### 1. Clone & Install Dependencies
 ```bash
-git clone https://github.com/VaibhavGoyal11/cascadeOS.git
+git clone https://github.com/viscous-236/cascaseOS.git
 cd cascadeOS
 npm install
 ```
@@ -383,10 +383,26 @@ cascadeOS/
 
 ---
 
-## 10. Automated Test Verification
+## 10. APIMatic Integration & Typed Transport Architecture (ARC-006, TASK-040)
 
-All **165/165 tests** pass with zero errors:
+CascadeOS implements typed API transport bindings for the PayPal Sandbox REST API:
+- **Typed HTTP Client**: [`server/src/services/paypalClient.ts`](server/src/services/paypalClient.ts) encapsulates typed headers, scoped authentication tokens (`invoicing` vs default), and RFC 6960 state signatures.
+- **Credential Redaction**: [`server/src/utils/redaction.ts`](server/src/utils/redaction.ts) scrubs bearer tokens, authorization headers, and API keys before logging (`SEC-008`).
+- **Observability**: Outbound HTTP status and roundtrip latency are recorded in `audit_events` (`GUD-006`) via [`integrationAudit.ts`](server/src/services/integrationAudit.ts).
+- **APIMatic SDK Generation**: Documented in [`docs/apimatic.md`](docs/apimatic.md) with an automated generation script [`server/scripts/generate-paypal-client.sh`](server/scripts/generate-paypal-client.sh) consuming PayPal OpenAPI definitions.
 
+---
+
+## 11. Automated Test Verification
+
+All **200/200 tests** pass cleanly across the monorepo:
+- **Server Vitest**: 181 passed across 12 test files (`npm test --workspace=server`)
+- **Client Vitest**: 19 passed across 4 test files (`npm test --workspace=client`)
+- **TypeScript**: 0 errors with `exactOptionalPropertyTypes: true` and `noUncheckedIndexedAccess: true`
+
+Scenario and health integration tests mock live PayPal, Channel3, and LLM boundaries, so `npm test` is deterministic and does not require network access. Live Sandbox verification still runs explicitly through `npm run verify:sandbox`.
+
+### Server Suites (181 tests):
 ```text
  ✓ server/src/engine/__tests__/engine.test.ts (43)
  ✓ server/src/engine/__tests__/dagValidator.test.ts (6)
@@ -395,27 +411,38 @@ All **165/165 tests** pass with zero errors:
  ✓ server/src/__tests__/phase4.test.ts (6)
  ✓ server/src/__tests__/channel3Service.test.ts (4)
  ✓ server/src/__tests__/dynamicProjectsIntegration.test.ts (6)
- ✓ server/src/__tests__/apiIntegration.test.ts (12)
+ ✓ server/src/__tests__/onboardingAndCrud.test.ts (4)
+ ✓ server/src/__tests__/apiIntegration.test.ts (15)
  ✓ server/src/__tests__/paypalAuthScopes.test.ts (6)
- ✓ server/src/__tests__/verifyLiveSandbox.test.ts (8)
-
- Test Files  10 passed (10)
-      Tests  165 passed (165)
+ ✓ server/src/__tests__/paypalClient.test.ts (6)
+ ✓ server/src/__tests__/verifyLiveSandbox.test.ts (11)
 ```
 
-- **`dagValidator.test.ts`**: Kahn's in-degree topological sort, cycle detection gate (`SEC-101`), linear DAGs, parallel DAGs, and disconnected components.
-- **`dynamicProjectsIntegration.test.ts`**: `GET /api/projects` KPI summaries, `POST /api/projects/create-custom` with live Kahn cycle verification, task schedule updating, dependency CRUD, and on-demand PayPal/Channel3 provisioning.
-- **`engine.test.ts`**: Minor-unit currency conversions, canonical RFC 6960 SHA-256 fingerprint determinism, blast radius calculations, and all 10 policy invariants.
-- **`phase1.test.ts`**: SQLite WAL mode, foreign key constraints, table schemas, and append-only triggers on `audit_events`.
-- **`phase3.test.ts`**: PayPal OAuth2 token refresh, Invoicing v2 draft/create-link handling, partial-payment updates with self-link resolution, multipart QR parsing, Orders v2 creation, and webhook signature verification.
-- **`channel3Service.test.ts`**: Live product search, SKU quote normalization, caching, and variance percentage computation.
-- **`phase4.test.ts`**: Project seeder and Groq OSS 120B empathetic nudge generator.
-- **`apiIntegration.test.ts`**: End-to-end REST API integration testing all scenario triggers, state synchronization, approval workflows, and studio copilot chat.
-- **`paypalAuthScopes.test.ts`**: Explicit `invoicing` scope token acquisition, scoped-token cache isolation, and draft-invoice self-link handling.
-- **`verifyLiveSandbox.test.ts`**: Fail-closed live-verifier coverage for invoice create/send, partial payment, QR, reminder, fallback IDs, Orders, and Channel3 pricing.
+### Client Suites (19 tests):
+```text
+ ✓ client/tests/api-contract.test.ts (4)
+ ✓ client/tests/checkoutFlow.test.tsx (3)
+ ✓ client/tests/studioAgent.test.ts (3)
+ ✓ client/tests/widgets.test.tsx (9)
+```
+
+Key test guarantees:
+- **`paypalClient.test.ts`**: Verifies typed transport, token scope isolation, audit event logging (`GUD-006`), and secret redaction (`SEC-008`).
+- **`onboardingAndCrud.test.ts`**: Verifies Kahn DAG cycle detection, custom-ID project onboarding, task schedule editing, dependency deletion, and policy re-evaluation.
+- **`checkoutFlow.test.tsx`**: Verifies PayPal SDK checkout calls backend order creation and capture routes rather than client-side direct orders.
+- **`widgets.test.tsx`**: Verifies AG Studio 3.0 custom widgets mount, parse typed `formatShape`, request mapped fields, and trigger bidirectional cross-filtering.
+- **`studioAgent.test.ts`**: Verifies AG Studio FinOps agent harness with native `runScenarioAnalysis` and `openPayPalApprovalModal` tools.
 
 ---
 
-## 11. License
+## 12. Demo Video & Submission Artifacts (CON-006)
+
+- **Walkthrough Video**: Pending recording — the final under-3-minute walkthrough link will be published here before submission.
+- **Public Git Repository**: [https://github.com/viscous-236/cascaseOS](https://github.com/viscous-236/cascaseOS)
+- **Live Deployment**: Hosted on Render with persistent SQLite storage and live sandbox bindings.
+
+---
+
+## 13. License
 
 MIT License — Copyright (c) 2026 Vaibhav Goyal. Free and open-source software for the PayPal AI Hackathon.

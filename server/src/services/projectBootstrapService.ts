@@ -516,3 +516,28 @@ export async function bootstrapApexClinicProject(
     paypalInvoiceIdPhase3: phase3InvoiceId ?? undefined,
   };
 }
+
+export interface StartupBootstrapDeps {
+  hasProjects?: () => boolean;
+  bootstrap?: (options?: BootstrapOptions) => Promise<BootstrapResult>;
+}
+
+/**
+ * Ensures at least one project exists on server boot (RISK-007).
+ * When SQLite is empty (e.g., fresh container, persistent volume wiped),
+ * creates the canonical Apex Clinic project with real Sandbox integrations.
+ */
+export async function ensureStartupBootstrap(
+  deps: StartupBootstrapDeps = {}
+): Promise<BootstrapResult | null> {
+  const hasProjects = deps.hasProjects ?? (() => ProjectRepo.findAll().length > 0);
+  const bootstrap = deps.bootstrap ?? bootstrapApexClinicProject;
+
+  if (hasProjects()) {
+    return null;
+  }
+
+  console.log('[Startup] No projects detected in SQLite — bootstrapping canonical Apex Clinic project...');
+  return bootstrap();
+}
+

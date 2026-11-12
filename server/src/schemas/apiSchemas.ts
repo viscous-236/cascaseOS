@@ -82,6 +82,16 @@ export const createPayPalOrderSchema = z.object({
     approvedFingerprint: z
       .string()
       .regex(/^(sha256:)?[a-f0-9]{64}$/i, 'approvedFingerprint must be a valid SHA-256 fingerprint'),
+    /**
+     * Optional optimistic total guard. This value is never used as the charged
+     * amount; the authoritative amount always comes from the persisted quote.
+     * It exists so clients can fail closed when their view is stale.
+     */
+    expectedTotalMinor: z
+      .number()
+      .int('expectedTotalMinor must be an integer number of minor units')
+      .positive('expectedTotalMinor must be positive')
+      .optional(),
   }).strict(),
 }).strict();
 

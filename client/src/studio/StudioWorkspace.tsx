@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 
 export const StudioWorkspace: React.FC = () => {
-  const { state, isRefreshing, refreshState, theme, activeProjectId } = useCascadeState();
+  const { state, isRefreshing, refreshState, theme, activeProjectId, openApprovalModal } = useCascadeState();
   const [studioMode, setStudioMode] = useState<'edit' | 'view'>('edit');
 
   // Studio reads `ai` once at initialisation, so the config stays stable while
@@ -36,9 +36,68 @@ export const StudioWorkspace: React.FC = () => {
     () =>
       createCascadeStudioAiConfig({
         getProjectId: () => activeProjectIdRef.current,
+        onOpenApprovalModal: () => openApprovalModal(),
       }),
-    []
+    [openApprovalModal]
   );
+
+  const initialDashboardState = useMemo(() => {
+    return {
+      selectedPageId: 'finops-overview',
+      pages: [
+        {
+          id: 'finops-overview',
+          widgets: {
+            'widget-recovery': {
+              type: 'CascadeRecoveryWidget',
+              format: {
+                title: { text: 'Milestone Recovery & Supplier Arbitrage', enabled: true },
+              },
+            },
+            'widget-nudge': {
+              type: 'FriendlyNudgeScoreboardWidget',
+              format: {
+                title: { text: 'Client Collaboration Scoreboard', enabled: true },
+              },
+            },
+            'widget-budget-bar': {
+              type: 'bar-chart-grouped',
+              format: {
+                title: { text: 'Phase Budget vs Idle Exposure', enabled: true },
+              },
+              dataMapping: {
+                categoryKey: [{ id: 'name' }],
+                valueKey: [{ id: 'daily_burn_usd' }, { id: 'unlock_usd' }],
+              },
+            },
+            'widget-quote-grid': {
+              type: 'grid',
+              format: {
+                title: { text: 'Supplier Quote Variance & Arbitrage', enabled: true },
+              },
+              dataMapping: {
+                cols: [
+                  { id: 'merchant' },
+                  { id: 'product' },
+                  { id: 'unit_price_usd' },
+                  { id: 'total_usd' },
+                  { id: 'savings_usd' },
+                  { id: 'variance_pct' },
+                  { id: 'availability' },
+                ],
+              },
+            },
+          },
+          widgetLayout: {
+            'widget-recovery': { xTrack: 0, yTrack: 0, xSpan: 6, ySpan: 6 },
+            'widget-nudge': { xTrack: 6, yTrack: 0, xSpan: 6, ySpan: 6 },
+            'widget-budget-bar': { xTrack: 0, yTrack: 6, xSpan: 6, ySpan: 6 },
+            'widget-quote-grid': { xTrack: 6, yTrack: 6, xSpan: 6, ySpan: 6 },
+          },
+        },
+      ],
+    };
+  }, []);
 
   const workspaceTheme = useMemo(() => {
     const dark = theme === 'dark';
@@ -65,7 +124,7 @@ export const StudioWorkspace: React.FC = () => {
     return {
       sources: [
         {
-          id: 'tasks',
+          id: 'project_tasks',
           name: 'Milestone FinOps Tasks',
           data: (state?.tasks || []).map((t) => ({
             id: t.task_id,
@@ -86,7 +145,7 @@ export const StudioWorkspace: React.FC = () => {
           })),
         },
         {
-          id: 'quotes',
+          id: 'supplier_quotes',
           name: 'Supplier Quotes & Arbitrage',
           data: (state?.supplierQuotes || []).map((q) => ({
             id: q.quote_id,
@@ -102,7 +161,7 @@ export const StudioWorkspace: React.FC = () => {
           })),
         },
         {
-          id: 'audit',
+          id: 'audit_events',
           name: 'Cryptographic Audit Events',
           data: (state?.auditEvents || []).map((a) => ({
             id: a.event_id,
@@ -179,6 +238,7 @@ export const StudioWorkspace: React.FC = () => {
       {/* Embedded AG Studio Canvas */}
       <div className="studio-canvas-scroll flex-1 w-full h-full relative" style={{ minHeight: '620px', overflowX: 'auto' }}>
         <AgStudio
+          initialState={initialDashboardState as any}
           data={studioData as any}
           widgets={cascadeCustomWidgets as any}
           ai={studioAiConfig}

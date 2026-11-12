@@ -18,6 +18,9 @@ import {
   type AgAiHarnessConfig,
   type AgAiHarnessSetupParams,
   type AgAiOutputMessage,
+  type AgAiTool,
+  type AgAiToolContext,
+  type AgAiToolInvocation,
   type AgLlmAdapter,
   type AgLlmRequest,
   type AgLlmResponse,
@@ -30,6 +33,8 @@ export interface FinOpsAgentConfigParams {
   getProjectId?: () => string | undefined;
   /** Injectable for tests; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
+  /** Callback to trigger the browser PayPal checkout / approval modal. */
+  onOpenApprovalModal?: () => void;
 }
 
 interface StudioChatResponse {
@@ -167,6 +172,88 @@ export function createCascadeLlmAdapter(params: FinOpsAgentConfigParams = {}): A
 }
 
 // ---------------------------------------------------------------------------
+// Client-side FinOps Agent Tools
+// ---------------------------------------------------------------------------
+
+export function createRunScenarioAnalysisTool(params: FinOpsAgentConfigParams = {}): AgAiTool {
+  const fetchImpl = params.fetchImpl ?? fetch;
+  return {
+    name: 'runScenarioAnalysis',
+    description:
+      'Triggers CascadeOS scenario analysis (SCENARIO_A, SCENARIO_B, or SCENARIO_C) to calculate idle exposure, fetch supplier quotes, and generate recovery plans.',
+    kind: 'client',
+    schema: () => ({
+      name: 'runScenarioAnalysis',
+      description:
+        'Triggers CascadeOS scenario analysis (SCENARIO_A, SCENARIO_B, or SCENARIO_C) to calculate idle exposure, fetch supplier quotes, and generate recovery plans.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scenarioId: {
+            type: 'string',
+            enum: ['SCENARIO_A', 'SCENARIO_B', 'SCENARIO_C'],
+            description: 'The scenario ID to evaluate (SCENARIO_A, SCENARIO_B, or SCENARIO_C)',
+          },
+        },
+        required: ['scenarioId'],
+      },
+      kind: 'client',
+    }),
+    async execute(call: AgAiToolInvocation, ctx: AgAiToolContext) {
+      try {
+        const scenarioId = (call.args.scenarioId as string) || 'SCENARIO_A';
+        const activeProjectId = params.getProjectId?.() ?? params.projectId;
+        const res = await fetchImpl(`/api/scenarios/${encodeURIComponent(scenarioId)}/trigger`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({
+            ...(activeProjectId ? { projectId: activeProjectId } : {}),
+          }),
+          signal: ctx.signal,
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          return ctx.error(`Scenario run failed with HTTP ${res.status}: ${err}`);
+        }
+
+        const data = await res.json();
+        return ctx.success(`Scenario ${scenarioId} executed successfully. Recovery plan generated.`, data);
+      } catch (err) {
+        return ctx.error(`Failed to execute scenario: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  };
+}
+
+export function createOpenPayPalApprovalModalTool(params: FinOpsAgentConfigParams = {}): AgAiTool {
+  return {
+    name: 'openPayPalApprovalModal',
+    description: 'Opens the browser PayPal checkout modal on the client for user review and approval of the recovery plan.',
+    kind: 'client',
+    schema: () => ({
+      name: 'openPayPalApprovalModal',
+      description: 'Opens the browser PayPal checkout modal on the client for user review and approval of the recovery plan.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      kind: 'client',
+    }),
+    async execute(_call: AgAiToolInvocation, ctx: AgAiToolContext) {
+      if (params.onOpenApprovalModal) {
+        params.onOpenApprovalModal();
+        return ctx.success('PayPal approval modal opened on client.', { opened: true });
+      }
+      return ctx.error('Approval modal handler is not configured on the client.');
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // AG Studio harness configuration
 // ---------------------------------------------------------------------------
 
@@ -175,13 +262,19 @@ export function buildCascadeHarnessConfig(
   params: FinOpsAgentConfigParams = {}
 ): AgAiHarnessConfig {
   const adapter = createCascadeLlmAdapter(params);
+  const runScenarioTool = createRunScenarioAnalysisTool(params);
+  const openApprovalModalTool = createOpenPayPalApprovalModalTool(params);
 
   const finOpsAgent = directLlmRunner({
     id: CASCADE_FINOPS_AGENT_ID,
     name: 'CascadeOS FinOps Agent',
     description: 'Autonomous schedule recovery and cashflow arbitrage copilot',
     instructions: () => FINOPS_SYSTEM_PROMPT,
-    tools: () => [ctx.tools.delegateTo([...CASCADE_DELEGATE_AGENT_IDS])],
+    tools: () => [
+      ctx.tools.delegateTo([...CASCADE_DELEGATE_AGENT_IDS]),
+      runScenarioTool,
+      openApprovalModalTool,
+    ],
     adapter,
   });
 

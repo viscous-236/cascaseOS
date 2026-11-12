@@ -23,6 +23,7 @@ import scenarioRouter from './routes/scenarioRoutes.js';
 import recoveryRouter from './routes/recoveryRoutes.js';
 import studioAgentRouter from './routes/studioAgentRoutes.js';
 import webhookRouter from './routes/webhookRoutes.js';
+import { ensureStartupBootstrap } from './services/projectBootstrapService.js';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -128,6 +129,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 export async function startServer(): Promise<void> {
   await initDatabase();
+  await ensureStartupBootstrap();
 
   const server = app.listen(env.PORT, () => {
     console.log(`🚀  CascadeOS Server running on http://localhost:${env.PORT} [${env.NODE_ENV}]`);

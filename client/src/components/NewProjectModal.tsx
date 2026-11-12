@@ -9,8 +9,9 @@
  * - Full Dark & Light theme compatibility with clean institutional styling
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { toast } from 'sonner';
 import {
   Sparkles,
   Layers,
@@ -30,7 +31,8 @@ import {
   Calendar,
   FileCode,
   Search,
-  ShoppingCart
+  ShoppingCart,
+  Upload,
 } from 'lucide-react';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import type { CreateCustomProjectPayload, ManualTaskInput, TaskDependencyInput } from '@/types/domain';
@@ -239,6 +241,131 @@ export const NewProjectModal: React.FC = () => {
         prev.filter((d) => d.from_task_id !== removedId && d.to_task_id !== removedId)
       );
     }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = (e.target?.result as string) || '';
+        if (!content.trim()) return;
+
+        if (file.name.endsWith('.json') || content.trim().startsWith('{') || content.trim().startsWith('[')) {
+          const parsed = JSON.parse(content);
+          let importedTasks: ManualTaskInput[] = [];
+          let importedDeps: TaskDependencyInput[] = [];
+
+          if (Array.isArray(parsed)) {
+            importedTasks = parsed;
+          } else if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.tasks)) {
+              importedTasks = parsed.tasks;
+            }
+            if (Array.isArray(parsed.dependencies)) {
+              importedDeps = parsed.dependencies;
+            }
+            if (typeof parsed.projectName === 'string') setProjectName(parsed.projectName);
+            if (typeof parsed.clientName === 'string') setClientName(parsed.clientName);
+            if (typeof parsed.clientEmail === 'string') setClientEmail(parsed.clientEmail);
+          }
+
+          if (importedTasks.length === 0) {
+            toast.error('JSON file does not contain a valid tasks array.');
+            return;
+          }
+
+          const sanitizedTasks: ManualTaskInput[] = importedTasks.map((t, idx) => ({
+            task_id: t.task_id || `phase_${idx + 1}_imported`,
+            name: t.name || `Phase ${idx + 1}`,
+            duration_days: Math.max(1, Number(t.duration_days) || 1),
+            start_date: t.start_date || startDate,
+            crew_assigned: t.crew_assigned || 'General Crew',
+            daily_idle_burn_minor: Number(t.daily_idle_burn_minor) || 50000,
+            sla_delay_penalty_minor: Number(t.sla_delay_penalty_minor) || 0,
+            phase_hardware_budget_max_minor: Number(t.phase_hardware_budget_max_minor) || 100000,
+            schedule_status: t.schedule_status || 'SCHEDULED',
+            invoice_total_minor: Number(t.invoice_total_minor) || 200000,
+            materials_unlock_minor: Number(t.materials_unlock_minor) || 50000,
+            deferred_labor_minor: Number(t.deferred_labor_minor) || 150000,
+            materials_in_warehouse: Boolean(t.materials_in_warehouse),
+            sku_search_query: t.sku_search_query || null,
+            required_quantity: Number(t.required_quantity) || 1,
+            incumbent_vendor_name: t.incumbent_vendor_name || null,
+            incumbent_unit_price_minor: t.incumbent_unit_price_minor ?? null,
+            historical_unit_price_minor: t.historical_unit_price_minor ?? null,
+            max_allowed_variance_pct: Number(t.max_allowed_variance_pct) || 10,
+            create_live_paypal_invoice: t.create_live_paypal_invoice ?? true,
+          }));
+
+          setManualTasks(sanitizedTasks);
+          if (importedDeps.length > 0) {
+            setManualDependencies(importedDeps);
+          }
+          toast.success(`Imported ${sanitizedTasks.length} phases from JSON!`);
+        } else {
+          // Parse CSV
+          const lines = content.split(/\r?\n/).filter((l) => l.trim().length > 0);
+          if (lines.length < 2) {
+            toast.error('CSV file must have a header row and at least one data row.');
+            return;
+          }
+          const header = lines[0]!.split(',').map((h) => h.trim().toLowerCase());
+          const nameIdx = header.findIndex((h) => h === 'name' || h === 'task_name' || h === 'phase');
+          const durIdx = header.findIndex((h) => h === 'duration_days' || h === 'duration' || h === 'days');
+          const crewIdx = header.findIndex((h) => h === 'crew_assigned' || h === 'crew');
+          const startIdx = header.findIndex((h) => h === 'start_date' || h === 'start');
+          const budgetIdx = header.findIndex((h) => h === 'budget' || h === 'phase_hardware_budget_max_usd' || h === 'hardware_budget');
+          const warehouseIdx = header.findIndex((h) => h === 'materials_in_warehouse' || h === 'in_warehouse' || h === 'staged');
+
+          const parsedTasks: ManualTaskInput[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            const row = lines[i]!.split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
+            if (row.length === 0 || !row[0]) continue;
+            const taskName = (nameIdx !== -1 && row[nameIdx]) ? row[nameIdx]! : `Phase ${i}`;
+            const dur = (durIdx !== -1 && Number(row[durIdx])) ? Math.max(1, Number(row[durIdx])) : 3;
+            const crew = (crewIdx !== -1 && row[crewIdx]) ? row[crewIdx]! : 'General Crew';
+            const sDate = (startIdx !== -1 && row[startIdx]) ? row[startIdx]! : startDate;
+            const budgetUsd = (budgetIdx !== -1 && Number(row[budgetIdx])) ? Number(row[budgetIdx]) : 1000;
+            const inWarehouse = warehouseIdx !== -1 ? (row[warehouseIdx]?.toLowerCase() === 'true' || row[warehouseIdx] === '1') : false;
+
+            parsedTasks.push({
+              task_id: `phase_${i}_csv`,
+              name: taskName,
+              duration_days: dur,
+              start_date: sDate,
+              crew_assigned: crew,
+              daily_idle_burn_minor: 50000,
+              sla_delay_penalty_minor: 0,
+              phase_hardware_budget_max_minor: Math.round(budgetUsd * 100),
+              schedule_status: 'SCHEDULED',
+              invoice_total_minor: Math.round(budgetUsd * 200),
+              materials_unlock_minor: Math.round(budgetUsd * 50),
+              deferred_labor_minor: Math.round(budgetUsd * 150),
+              materials_in_warehouse: inWarehouse,
+              required_quantity: 1,
+              max_allowed_variance_pct: 10,
+              create_live_paypal_invoice: true,
+            });
+          }
+
+          if (parsedTasks.length === 0) {
+            toast.error('No tasks could be parsed from the CSV file.');
+            return;
+          }
+          setManualTasks(parsedTasks);
+          toast.success(`Imported ${parsedTasks.length} phases from CSV!`);
+        }
+      } catch (err) {
+        toast.error('Failed to parse file: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -510,15 +637,34 @@ export const NewProjectModal: React.FC = () => {
                       Configure duration, crew, idle burn, and live retail hardware lookup
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddPhase}
-                    disabled={isSubmitting}
-                    className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Phase</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept=".csv,.json"
+                      className="hidden"
+                      onChange={handleFileUpload}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isSubmitting}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors"
+                      title="Upload and parse .csv or .json tasks file"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Import CSV / JSON</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddPhase}
+                      disabled={isSubmitting}
+                      className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono rounded-lg bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Phase</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2.5 max-h-[320px] overflow-y-auto pr-1">

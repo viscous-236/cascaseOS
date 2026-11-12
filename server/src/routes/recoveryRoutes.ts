@@ -305,7 +305,7 @@ router.post(
       return;
     }
 
-    const { planId, taskId, quoteId, approvedFingerprint } = validation.data.body;
+    const { planId, taskId, quoteId, approvedFingerprint, expectedTotalMinor } = validation.data.body;
     const db = getDb();
 
     // 1. Verify plan exists and is approved
@@ -332,6 +332,15 @@ router.post(
 
     if (!task || !quote || task.project_id !== plan.project_id || quote.task_id !== task.task_id) {
       res.status(404).json({ error: 'Task or supplier quote not found' });
+      return;
+    }
+    if (expectedTotalMinor !== undefined && expectedTotalMinor !== quote.total_minor) {
+      res.status(409).json({
+        error: 'Expected total does not match the persisted supplier quote',
+        reasonCodes: ['STALE_QUOTE_TOTAL'],
+        expectedTotalMinor,
+        actualTotalMinor: quote.total_minor,
+      });
       return;
     }
     const projectCurrency = ProjectRepo.findById(task.project_id)?.currency ?? 'USD';

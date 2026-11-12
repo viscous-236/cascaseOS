@@ -38,18 +38,21 @@ function successfulDeps(): LiveSandboxVerifierDeps {
     }),
     sendInvoiceReminder: vi.fn().mockResolvedValue(undefined),
     createSupplierOrder: vi.fn().mockResolvedValue({
-      id: 'ORDER-123',
+      id: '5O190127TN364715T',
       status: 'CREATED',
     }),
     searchChannel3Products: vi.fn().mockResolvedValue({
       products: [
         {
+          id: 'ch3_prod_trane_xr14',
           title: 'Trane XR14 Commercial Compressor',
           brands: [{ name: 'Trane' }],
           offers: [{ domain: 'hvac.example.com', price: { price: 349 } }],
         },
       ],
     }),
+    persistOrder: vi.fn(),
+    persistQuote: vi.fn(),
   };
 }
 
@@ -66,9 +69,12 @@ describe('verifyLiveSandbox', () => {
     expect(report.partialPaymentMinimum).toBe('1396.00');
     expect(report.qrCodeBase64Length).toBeGreaterThan(0);
     expect(report.reminderSent).toBe(true);
-    expect(report.orderId).toBe('ORDER-123');
+    expect(report.orderId).toBe('5O190127TN364715T');
+    expect(report.orderStatus).toBe('CREATED');
+    expect(report.orderPersisted).toBe(true);
     expect(report.channel3ProductCount).toBe(1);
     expect(report.channel3Price).toBe(349);
+    expect(report.quotePersisted).toBe(true);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('SUCCESS'));
 
     expect(deps.createDraftInvoice).toHaveBeenCalledWith(
@@ -84,6 +90,62 @@ describe('verifyLiveSandbox', () => {
       expect.any(String),
       expect.any(String)
     );
+    expect(deps.persistOrder).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: '5O190127TN364715T',
+        status: 'CREATED',
+        amountMinor: 139600,
+        currency: 'USD',
+      })
+    );
+    expect(deps.persistQuote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        externalProductId: 'ch3_prod_trane_xr14',
+        unitPriceMinor: 34900,
+        totalMinor: 34900,
+      })
+    );
+  });
+
+  it('fails closed when PayPal returns an order that is not CREATED', async () => {
+    const deps = successfulDeps();
+    deps.createSupplierOrder = vi.fn().mockResolvedValue({
+      id: '5O190127TN364715T',
+      status: 'COMPLETED',
+    });
+
+    await expect(runLiveSandboxVerification(deps, vi.fn())).rejects.toThrow(
+      /expected CREATED status/i
+    );
+    expect(deps.persistOrder).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when order persistence throws', async () => {
+    const deps = successfulDeps();
+    deps.persistOrder = vi.fn().mockImplementation(() => {
+      throw new Error('FK constraint failed');
+    });
+
+    await expect(runLiveSandboxVerification(deps, vi.fn())).rejects.toThrow(
+      /order persistence failed/i
+    );
+  });
+
+  it('fails closed when the Channel3 product has no external ID', async () => {
+    const deps = successfulDeps();
+    deps.searchChannel3Products = vi.fn().mockResolvedValue({
+      products: [
+        {
+          title: 'Unidentified product',
+          offers: [{ domain: 'shop.example.com', price: { price: 349 } }],
+        },
+      ],
+    });
+
+    await expect(runLiveSandboxVerification(deps, vi.fn())).rejects.toThrow(
+      /external product ID/i
+    );
+    expect(deps.persistQuote).not.toHaveBeenCalled();
   });
 
   it('fails closed when PayPal invoice creation fails', async () => {

@@ -23,6 +23,70 @@ import * as dbModule from '../db/database.js';
 import { clearPayPalTokenCache } from '../services/paypalAuthService.js';
 import { clearOpenAIClient } from '../services/nudgeAndFinOpsAiService.js';
 import { APEX_PROJECT_ID } from '../services/projectBootstrapService.js';
+import { computeStateFingerprint } from '../utils/moneyAndHash.js';
+
+const paypalOrdersMock = vi.hoisted(() => ({
+  createSupplierOrder: vi.fn(),
+  captureSupplierOrder: vi.fn(),
+  getOrderDetails: vi.fn(),
+}));
+
+vi.mock('../services/paypalOrdersService.js', () => paypalOrdersMock);
+
+/** Health checks must not call live PayPal/Channel3 APIs during unit tests. */
+const paypalAuthMock = vi.hoisted(() => ({
+  getPayPalAccessToken: vi.fn(async () => 'test-paypal-access-token'),
+  getPayPalInvoicingAccessToken: vi.fn(async () => 'test-paypal-invoicing-token'),
+  clearPayPalTokenCache: vi.fn(),
+}));
+
+vi.mock('../services/paypalAuthService.js', () => paypalAuthMock);
+
+vi.mock('../services/channel3Service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/channel3Service.js')>();
+  return {
+    ...actual,
+    searchChannel3Products: vi.fn(async () => ({ products: [] })),
+  };
+});
+
+/**
+ * Scenario execution tests must never depend on live LLM latency. These mocks
+ * keep the deterministic fallback contract while removing the network call.
+ */
+const aiServiceMock = vi.hoisted(() => {
+  const format = (minor: number) => `USD $${(minor / 100).toFixed(2)}`;
+  return {
+    clearOpenAIClient: vi.fn(),
+    generateClientNudgeMessage: vi.fn(async (params: {
+      projectName: string;
+      blockedTaskName: string;
+      materialsUnlockMinor: number;
+      invoiceTotalMinor: number;
+      exposureAtRiskMinor: number;
+    }) => ({
+      subject: `Milestone Update: ${params.projectName}`,
+      body: `Materials unlock ${format(params.materialsUnlockMinor)} keeps ${params.blockedTaskName} on schedule.`,
+      summary: 'Deterministic test nudge',
+      tone: 'warm_collaborative',
+      materials_unlock_amount_formatted: format(params.materialsUnlockMinor),
+      invoice_total_amount_formatted: format(params.invoiceTotalMinor),
+      exposure_at_risk_formatted: format(params.exposureAtRiskMinor),
+      key_call_to_action: `Unlock materials for ${format(params.materialsUnlockMinor)}`,
+    })),
+    generateFinOpsPolicyExplanation: vi.fn(async (params: {
+      taskName: string;
+      decision: string;
+    }) => ({
+      headline: `${params.decision}: Policy evaluation for ${params.taskName}`,
+      reason_summary: 'Deterministic test explanation',
+      policy_decision: params.decision,
+      remediation_steps: ['Review the policy decision', 'Collect compliant supplier quotes'],
+    })),
+  };
+});
+
+vi.mock('../services/nudgeAndFinOpsAiService.js', () => aiServiceMock);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -38,6 +102,9 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
     dbModule.setDbForTesting(testDb);
     clearPayPalTokenCache();
     clearOpenAIClient();
+    paypalOrdersMock.createSupplierOrder.mockReset();
+    paypalOrdersMock.captureSupplierOrder.mockReset();
+    paypalOrdersMock.getOrderDetails.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -72,6 +139,31 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
         .post('/api/recovery-plans/plan_123/approve-schedule-and-split')
         .send({ approverActor: 'Alice' }); // missing approvedFingerprint
       expect(res.status).toBe(400);
+    });
+
+    it('TEST-009: rejects negative, floating-point, and missing order amounts with 400', async () => {
+      const validFingerprint = 'a'.repeat(64);
+      const base = {
+        planId: 'plan_validation',
+        taskId: 'task_validation',
+        quoteId: 'quote_validation',
+        approvedFingerprint: validFingerprint,
+      };
+
+      const negative = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({ ...base, expectedTotalMinor: -139600 });
+      expect(negative.status).toBe(400);
+
+      const floating = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({ ...base, expectedTotalMinor: 1396.55 });
+      expect(floating.status).toBe(400);
+
+      const missing = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({ planId: 'plan_validation' });
+      expect(missing.status).toBe(400);
     });
 
     it('rejects non-existent endpoint with 404', async () => {
@@ -138,6 +230,41 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
     }, 20000);
 
     it('SCENARIO_B: blocks incumbent price creep (+28.95%) and evaluates Channel3 replacement', async () => {
+      // Seed a cached CHANNEL3_LIVE quote so the scenario uses the SQLite cache
+      // path (CON-003) instead of making a live Channel3 network request.
+      testDb.prepare(
+        `INSERT INTO supplier_quotes (
+          quote_id, task_id, source_type, external_product_id, product_title,
+          merchant_name, product_url, image_url, currency, unit_price_minor,
+          quantity, shipping_minor, tax_minor, total_minor, variance_vs_historical_pct,
+          savings_vs_incumbent_minor, availability_status, observed_at
+        ) VALUES (
+          @quote_id, @task_id, @source_type, @external_product_id, @product_title,
+          @merchant_name, @product_url, @image_url, @currency, @unit_price_minor,
+          @quantity, @shipping_minor, @tax_minor, @total_minor, @variance_vs_historical_pct,
+          @savings_vs_incumbent_minor, @availability_status, @observed_at
+        )`
+      ).run({
+        quote_id: 'quote_test_channel3_phase2',
+        task_id: 'task_phase_2_displays',
+        source_type: 'CHANNEL3_LIVE',
+        external_product_id: 'ch3-display-349',
+        product_title: 'Dell UltraSharp 32" 4K USB-C Monitor',
+        merchant_name: 'Channel3 Verified Merchant',
+        product_url: 'https://example.com/ch3-display-349',
+        image_url: null,
+        currency: 'USD',
+        unit_price_minor: 34900,
+        quantity: 4,
+        shipping_minor: 0,
+        tax_minor: 0,
+        total_minor: 139600,
+        variance_vs_historical_pct: -8.16,
+        savings_vs_incumbent_minor: 56400,
+        availability_status: 'IN_STOCK',
+        observed_at: new Date().toISOString(),
+      });
+
       const res = await request(app).post('/api/scenarios/SCENARIO_B/trigger');
       expect(res.status).toBe(200);
       expect(res.body.scenarioId).toBe('SCENARIO_B');
@@ -200,21 +327,146 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(approvals).toHaveLength(1);
     });
 
-    it('TEST-007: rejects approval with 409 Conflict if state fingerprint does not match (tamper-detection)', async () => {
-      const tamperedFingerprint = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
-      const res = await request(app)
+    /**
+     * Scenario A's persisted incumbent quote is intentionally over budget, so
+     * order-level tests replace it with a compliant Channel3-shaped quote and
+     * recompute the canonical fingerprint before approval.
+     */
+    async function prepareCompliantApprovedOrder() {
+      const quote = testDb
+        .prepare('SELECT * FROM supplier_quotes WHERE quote_id = ?')
+        .get(scenarioAPlan.selected_quote_id) as any;
+      testDb
+        .prepare(
+          `UPDATE supplier_quotes
+           SET source_type = 'CHANNEL3_LIVE', external_product_id = 'ch3-display-349',
+               unit_price_minor = 34900, quantity = 4, total_minor = 139600,
+               variance_vs_historical_pct = -8.16, savings_vs_incumbent_minor = 56400
+           WHERE quote_id = ?`
+        )
+        .run(quote.quote_id);
+
+      const task = testDb
+        .prepare('SELECT * FROM tasks WHERE task_id = ?')
+        .get(quote.task_id) as any;
+      const fingerprint = computeStateFingerprint({
+        projectId: scenarioAPlan.project_id,
+        blockedTaskId: scenarioAPlan.blocked_task_id,
+        promotedTaskId: scenarioAPlan.promoted_task_id,
+        invoiceId: task.paypal_invoice_id ?? `${scenarioAPlan.project_id}:${scenarioAPlan.blocked_task_id}`,
+        unlockAmountMinor: scenarioAPlan.immediate_unlock_minor,
+        channel3ProductId: 'ch3-display-349',
+        supplierTotalMinor: 139600,
+        currency: 'USD',
+      });
+      testDb
+        .prepare('UPDATE recovery_plans SET state_fingerprint = ? WHERE plan_id = ?')
+        .run(fingerprint, scenarioAPlan.plan_id);
+
+      const approval = await request(app)
         .post(`/api/recovery-plans/${scenarioAPlan.plan_id}/approve-schedule-and-split`)
+        .send({ approvedFingerprint: fingerprint, approverActor: 'Supervisor Vance' });
+      expect(approval.status).toBe(200);
+
+      return { quote, taskId: quote.task_id as string, fingerprint };
+    }
+
+    it('TEST-007: rejects a 1-cent quote mutation after approval with 409 STALE_FINGERPRINT_APPROVAL', async () => {
+      const { quote, taskId, fingerprint } = await prepareCompliantApprovedOrder();
+
+      testDb
+        .prepare('UPDATE supplier_quotes SET total_minor = total_minor + 1 WHERE quote_id = ?')
+        .run(quote.quote_id);
+
+      const res = await request(app)
+        .post('/api/paypal/orders/create')
         .send({
-          approvedFingerprint: tamperedFingerprint,
-          approverActor: 'MaliciousActor',
+          planId: scenarioAPlan.plan_id,
+          taskId,
+          quoteId: quote.quote_id,
+          approvedFingerprint: fingerprint,
         });
 
       expect(res.status).toBe(409);
       expect(res.body.reasonCodes).toContain('STALE_FINGERPRINT_APPROVAL');
+      expect(paypalOrdersMock.createSupplierOrder).not.toHaveBeenCalled();
+    });
 
-      // Audit event was written
-      const auditRows = testDb.prepare("SELECT * FROM audit_events WHERE decision = 'BLOCK'").all();
-      expect(auditRows.length).toBeGreaterThanOrEqual(1);
+    it('TEST-014: creates the backend order, captures it, and transitions the task to MATERIALS_ORDERED', async () => {
+      const { quote, taskId, fingerprint } = await prepareCompliantApprovedOrder();
+      paypalOrdersMock.createSupplierOrder.mockResolvedValue({
+        id: '5O190127TN364715T',
+        status: 'CREATED',
+      });
+      paypalOrdersMock.captureSupplierOrder.mockResolvedValue({
+        id: '5O190127TN364715T',
+        status: 'COMPLETED',
+        purchase_units: [
+          {
+            reference_id: taskId,
+            payments: {
+              captures: [
+                {
+                  id: 'CAPTURE-9XY12345',
+                  status: 'COMPLETED',
+                  amount: { currency_code: 'USD', value: '1396.00' },
+                },
+              ],
+            },
+          },
+        ],
+      });
+
+      const createRes = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({
+          planId: scenarioAPlan.plan_id,
+          taskId,
+          quoteId: quote.quote_id,
+          approvedFingerprint: fingerprint,
+          expectedTotalMinor: 139600,
+        });
+      expect(createRes.status).toBe(201);
+      expect(createRes.body.paypalOrderId).toBe('5O190127TN364715T');
+
+      const orderRow = testDb
+        .prepare("SELECT * FROM paypal_transactions WHERE kind = 'ORDER_CREATE'")
+        .get() as any;
+      expect(orderRow.paypal_resource_id).toBe('5O190127TN364715T');
+      expect(orderRow.status).toBe('CREATED');
+
+      const captureRes = await request(app)
+        .post('/api/paypal/orders/5O190127TN364715T/capture')
+        .send({ taskId });
+      expect(captureRes.status).toBe(200);
+      expect(captureRes.body.captureId).toBe('CAPTURE-9XY12345');
+
+      const captureRow = testDb
+        .prepare("SELECT * FROM paypal_transactions WHERE kind = 'ORDER_CAPTURE'")
+        .get() as any;
+      expect(captureRow.paypal_capture_id).toBe('CAPTURE-9XY12345');
+      expect(captureRow.status).toBe('COMPLETED');
+
+      const taskRow = testDb
+        .prepare('SELECT schedule_status FROM tasks WHERE task_id = ?')
+        .get(taskId) as { schedule_status: string };
+      expect(taskRow.schedule_status).toBe('MATERIALS_ORDERED');
+    });
+
+    it('rejects an order when the client expected total does not match the persisted quote', async () => {
+      const { quote, taskId, fingerprint } = await prepareCompliantApprovedOrder();
+      const res = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({
+          planId: scenarioAPlan.plan_id,
+          taskId,
+          quoteId: quote.quote_id,
+          approvedFingerprint: fingerprint,
+          expectedTotalMinor: 139601,
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.reasonCodes).toContain('STALE_QUOTE_TOTAL');
     });
   });
 

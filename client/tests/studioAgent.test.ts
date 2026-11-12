@@ -67,6 +67,58 @@ describe('CascadeOS Studio agent configuration', () => {
 
     expect(delegateTo).toHaveBeenCalledWith(['data', 'widget']);
     expect(tools).toContain(delegateTool);
+    expect(tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['delegate_to', 'runScenarioAnalysis', 'openPayPalApprovalModal'])
+    );
+  });
+
+  it('executes client-side tools openPayPalApprovalModal and runScenarioAnalysis', async () => {
+    const { ctx } = harnessContext();
+    const onOpenApprovalModal = vi.fn();
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, plan: { id: 'plan_123' } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const config = buildCascadeHarnessConfig(ctx, {
+      projectId: 'proj_xyz',
+      onOpenApprovalModal,
+      fetchImpl,
+    });
+    const finOpsAgent = config.agents.find((agent) => agent.id === 'cascade-finops-agent')!;
+    const tools = finOpsAgent.tools!({ api: {} as never, studio: {} as never, tools: ctx.tools }, undefined);
+
+    const modalTool = tools.find((t) => t.name === 'openPayPalApprovalModal');
+    expect(modalTool).toBeDefined();
+    const dummyCtx = {
+      signal: new AbortController().signal,
+      run: { threadId: 't1', runId: 'r1' },
+      success: (res: string, data?: unknown) => ({ success: true as const, response: res, data }),
+      error: (msgs: string | string[]) => ({
+        success: false as const,
+        issues: (Array.isArray(msgs) ? msgs : [msgs]).map((m) => ({ message: m })),
+      }),
+    };
+
+    const modalResult = await modalTool!.execute!({ toolCallId: 'c1', name: 'openPayPalApprovalModal', args: {} }, dummyCtx);
+    expect(modalResult.success).toBe(true);
+    expect(onOpenApprovalModal).toHaveBeenCalledTimes(1);
+
+    const runTool = tools.find((t) => t.name === 'runScenarioAnalysis');
+    expect(runTool).toBeDefined();
+    const runResult = await runTool!.execute!(
+      { toolCallId: 'c2', name: 'runScenarioAnalysis', args: { scenarioId: 'SCENARIO_B' } },
+      dummyCtx
+    );
+    expect(runResult.success).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/scenarios/SCENARIO_B/trigger',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ projectId: 'proj_xyz' }),
+      })
+    );
   });
 
   it('routes chat turns through the CascadeOS backend and emits AG-UI text events', async () => {

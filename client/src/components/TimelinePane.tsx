@@ -43,6 +43,8 @@ export const TimelinePane: React.FC = () => {
     openTaskDrawer,
     addNewTaskPhase,
     updateTaskSchedule,
+    createDependency,
+    deleteDependency,
   } = useCascadeState();
   const ganttRef = useRef<BryntumGantt>(null);
 
@@ -133,13 +135,13 @@ export const TimelinePane: React.FC = () => {
     {
       type: 'wbs',
       text: 'WBS',
-      width: 50,
+      width: 45,
       align: 'center',
     },
     {
       type: 'name',
       text: 'Milestone',
-      width: 240,
+      width: 220,
       renderer: ({ record }: any) => {
         const isSelected = selectedTaskId === record.id;
         return `
@@ -152,8 +154,7 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Crew',
       field: 'crewAssigned',
-      hidden: true,
-      width: 150,
+      width: 130,
       renderer: ({ record }: any) => `
         <div class="flex items-center space-x-1.5 text-xs font-mono opacity-80">
           <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
@@ -164,13 +165,12 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Status',
       field: 'scheduleStatus',
-      hidden: true,
-      width: 150,
+      width: 140,
       renderer: ({ record }: any) => {
         const st: ScheduleStatus = record.scheduleStatus;
         let badgeColor = 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-800';
         let dotColor = 'bg-neutral-400';
-        let label: string = st;
+        let label: string = st || 'SCHEDULED';
 
         if (st === 'COMPLETED') {
           badgeColor = 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800/50';
@@ -192,16 +192,35 @@ export const TimelinePane: React.FC = () => {
         return `
           <div class="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono border ${badgeColor}">
             <span class="w-1.5 h-1.5 rounded-full ${dotColor}"></span>
-            <span class="tracking-wide">${label.replace(/_/g, ' ')}</span>
+            <span class="tracking-wide">${escapeHtml(label.replace(/_/g, ' '))}</span>
           </div>
         `;
       },
     },
     {
+      type: 'duration',
+      text: 'Duration',
+      width: 80,
+      align: 'center',
+    },
+    {
+      type: 'date',
+      text: 'Start',
+      field: 'startDate',
+      width: 90,
+      format: 'YYYY-MM-DD',
+    },
+    {
+      type: 'date',
+      text: 'End',
+      field: 'endDate',
+      width: 90,
+      format: 'YYYY-MM-DD',
+    },
+    {
       text: 'PayPal Invoice',
       field: 'invoiceStatus',
-      hidden: true,
-      width: 140,
+      width: 130,
       renderer: ({ record }: any) => {
         const inv: PayPalInvoiceStatus = record.invoiceStatus;
         let badgeColor = 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-300 dark:border-neutral-800';
@@ -224,7 +243,7 @@ export const TimelinePane: React.FC = () => {
         return `
           <div class="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded text-[10px] font-mono border ${badgeColor}">
             <span class="w-1.5 h-1.5 rounded-full ${dotColor}"></span>
-            <span>${inv}</span>
+            <span>${escapeHtml(inv || 'NONE')}</span>
           </div>
         `;
       },
@@ -232,11 +251,10 @@ export const TimelinePane: React.FC = () => {
     {
       text: 'Unlock Amount',
       field: 'materialsUnlockMinor',
-      hidden: true,
       align: 'right',
-      width: 120,
+      width: 110,
       renderer: ({ record }: any) => {
-        const amt = formatMinorToUSD(record.materialsUnlockMinor);
+        const amt = formatMinorToUSD(record.materialsUnlockMinor || 0);
         return `<span class="font-mono text-xs font-medium text-emerald-600 dark:text-emerald-400">${amt}</span>`;
       },
     },
@@ -251,22 +269,6 @@ export const TimelinePane: React.FC = () => {
         return `<span class="font-mono text-xs text-rose-600 dark:text-rose-400">${amt}/d</span>`;
       },
     },
-    {
-      type: 'date',
-      text: 'Start',
-      field: 'startDate',
-      hidden: true,
-      width: 95,
-      format: 'YYYY-MM-DD',
-    },
-    {
-      type: 'date',
-      text: 'End',
-      field: 'endDate',
-      hidden: true,
-      width: 95,
-      format: 'YYYY-MM-DD',
-    },
   ], [selectedTaskId]);
 
   const ganttConfig = useMemo(() => ({
@@ -277,9 +279,38 @@ export const TimelinePane: React.FC = () => {
       disabled: !criticalPathEnabled,
     },
     taskRenderer: ({ taskRecord }: any) => {
+      let pillText = '';
+      let pillClass = '';
+      const sched = taskRecord.scheduleStatus;
+      const inv = taskRecord.invoiceStatus;
+
+      if (sched === 'COMPLETED') {
+        pillText = 'COMPLETED';
+        pillClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      } else if (inv === 'OVERDUE' || sched === 'PAYMENT_BLOCKED') {
+        pillText = 'OVERDUE — BLOCKING';
+        pillClass = 'bg-rose-500/20 text-rose-300 border-rose-500/40 font-semibold';
+      } else if (sched === 'REROUTED_ACTIVE') {
+        pillText = 'REROUTED — ACTIVE';
+        pillClass = 'bg-sky-500/20 text-sky-300 border-sky-500/40';
+      } else if (sched === 'MATERIALS_ORDERED') {
+        pillText = 'MATERIALS ORDERED';
+        pillClass = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+      } else if (inv === 'PARTIALLY_PAID') {
+        pillText = 'PARTIAL UNLOCKED';
+        pillClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      } else if (inv === 'PAID') {
+        pillText = 'PAID';
+        pillClass = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      } else if (sched) {
+        pillText = String(sched).replace(/_/g, ' ');
+        pillClass = 'bg-neutral-500/20 text-neutral-300 border-neutral-500/40';
+      }
+
       return `
         <div class="b-gantt-task-content flex items-center justify-between w-full h-full px-2.5 overflow-hidden text-xs">
-          <span class="truncate">${escapeHtml(phaseName(taskRecord.name))}</span>
+          <span class="truncate font-medium">${escapeHtml(phaseName(taskRecord.name))}</span>
+          ${pillText ? `<span class="ml-2 px-1.5 py-0.5 rounded text-[9px] font-mono whitespace-nowrap border ${pillClass}">${escapeHtml(pillText)}</span>` : ''}
         </div>
       `;
     },
@@ -383,6 +414,22 @@ export const TimelinePane: React.FC = () => {
         duration_days: duration,
       });
     }
+  };
+
+  const handleAfterDependencyCreateDrop = async ({ source, target, dependency }: any) => {
+    const fromId = String(dependency?.from ?? source?.id ?? '');
+    const toId = String(dependency?.to ?? target?.id ?? '');
+    if (fromId && toId && fromId !== toId) {
+      const lag = typeof dependency?.lag === 'number' ? dependency.lag : 0;
+      await createDependency(fromId, toId, lag);
+    }
+  };
+
+  const handleBeforeDependencyDelete = async ({ dependencyRecord }: any): Promise<boolean> => {
+    if (dependencyRecord?.id) {
+      await deleteDependency(String(dependencyRecord.id));
+    }
+    return true;
   };
 
   return (
@@ -531,6 +578,8 @@ export const TimelinePane: React.FC = () => {
           onTaskDblClick={handleTaskDblClick}
           onAfterTaskDrop={handleAfterTaskDrop}
           onAfterTaskEdit={handleAfterTaskEdit}
+          onAfterDependencyCreateDrop={handleAfterDependencyCreateDrop}
+          onBeforeDependencyDelete={handleBeforeDependencyDelete}
           cls="w-full h-full"
         />
       </div>

@@ -11,7 +11,7 @@
  * - Full Dark & Light theme support
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js';
@@ -49,6 +49,8 @@ export const ApprovalCheckoutModal: React.FC = () => {
     activePlan,
     state,
     approvePlan,
+    createSupplierOrder,
+    captureSupplierOrder,
     refreshState,
   } = useCascadeState();
 
@@ -57,8 +59,17 @@ export const ApprovalCheckoutModal: React.FC = () => {
   const [isCopied, setIsCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<'DIFF' | 'PAYPAL_CHECKOUT' | 'SUCCESS'>('DIFF');
+  const [checkoutApproved, setCheckoutApproved] = useState(false);
+  const approvalInFlightRef = useRef<Promise<boolean> | null>(null);
   const dialogRef = useDialog(isApprovalModalOpen && !!activePlan, () => { if (!isSubmitting) closeApprovalModal(); });
-  useEffect(() => { if (isApprovalModalOpen) { setCheckoutStep('DIFF'); setIsCopied(false); } }, [isApprovalModalOpen, activePlan?.plan_id]);
+  useEffect(() => {
+    if (isApprovalModalOpen) {
+      setCheckoutStep('DIFF');
+      setIsCopied(false);
+      setCheckoutApproved(false);
+      approvalInFlightRef.current = null;
+    }
+  }, [isApprovalModalOpen, activePlan?.plan_id]);
   const canApprove = activePlan?.status === 'PROPOSED' && activePlan.policy_decision !== 'BLOCK' && !!approverName.trim();
 
   // Parse reason codes from JSON
@@ -126,6 +137,39 @@ export const ApprovalCheckoutModal: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  /**
+   * PayPal order creation requires an APPROVED recovery plan on the server.
+   * Sign the plan immediately before creating the order, keeping the modal open
+   * so the buyer can complete checkout. Concurrent createOrder retries share
+   * the same approval promise.
+   */
+  const ensureApprovedForCheckout = async (): Promise<boolean> => {
+    if (!activePlan) return false;
+    if (
+      checkoutApproved ||
+      activePlan.status === 'APPROVED' ||
+      activePlan.status === 'EXECUTED'
+    ) {
+      return true;
+    }
+    if (activePlan.status !== 'PROPOSED') {
+      toast.error('Recovery plan cannot be checked out', {
+        description: `Plan status is ${activePlan.status}.`,
+      });
+      return false;
+    }
+
+    if (approvalInFlightRef.current === null) {
+      approvalInFlightRef.current = approvePlan(approverName, customNote || undefined, {
+        closeModal: false,
+      });
+    }
+    const approved = await approvalInFlightRef.current;
+    approvalInFlightRef.current = null;
+    if (approved) setCheckoutApproved(true);
+    return approved;
   };
 
   if (!isApprovalModalOpen || !activePlan) {
@@ -645,7 +689,11 @@ export const ApprovalCheckoutModal: React.FC = () => {
                         }}
                       >
                         <PayPalButtons
-                          disabled={isSubmitting || !canApprove}
+                          disabled={
+                            isSubmitting ||
+                            activePlan.policy_decision === 'BLOCK' ||
+                            (activePlan.status !== 'PROPOSED' && activePlan.status !== 'APPROVED')
+                          }
                           style={{
                             layout: 'vertical',
                             color: 'gold',
@@ -653,29 +701,52 @@ export const ApprovalCheckoutModal: React.FC = () => {
                             label: 'pay',
                             height: 38,
                           }}
-                          createOrder={(_data, actions) => {
-                            return actions.order.create({
-                              intent: 'CAPTURE',
-                              purchase_units: [
-                                {
-                                  reference_id: activePlan.plan_id,
-                                  description: `CascadeOS Materials Unlock: ${promotedTask?.name || 'Milestone Unlock'}`,
-                                  amount: {
-                                    currency_code: 'USD',
-                                    value: unlockAmountUSD,
-                                  },
-                                },
-                              ],
+                          createOrder={async () => {
+                            const approved = await ensureApprovedForCheckout();
+                            if (!approved) {
+                              throw new Error('Recovery plan approval failed before PayPal order creation');
+                            }
+
+                            const order = await createSupplierOrder({
+                              planId: activePlan.plan_id,
+                              taskId: activePlan.blocked_task_id,
+                              quoteId: activePlan.selected_quote_id,
+                              approvedFingerprint: activePlan.state_fingerprint,
+                              ...(selectedQuote !== null
+                                ? { expectedTotalMinor: selectedQuote.total_minor }
+                                : {}),
                             });
+
+                            toast.message('PayPal Sandbox order created', {
+                              description: `Order ${order.paypalOrderId} • ${formatMinorToUSD(order.totalMinor)} ${order.currency}`,
+                            });
+                            return order.paypalOrderId;
                           }}
-                          onApprove={async (_data, actions) => {
-                            if (actions.order) {
-                              const capture = await actions.order.capture();
+                          onApprove={async (data) => {
+                            const orderId = data.orderID;
+                            if (!orderId) {
+                              toast.error('PayPal did not return an order ID');
+                              return;
+                            }
+
+                            try {
+                              const capture = await captureSupplierOrder(
+                                orderId,
+                                activePlan.blocked_task_id,
+                                activePlan.promoted_task_id === activePlan.blocked_task_id
+                                  ? activePlan.plan_id
+                                  : undefined
+                              );
                               fireCelebration();
                               toast.success('PayPal Sandbox Order Captured!', {
-                                description: `Order ID: ${capture.id} • Status: ${capture.status}`,
+                                description: `Capture ID: ${capture.captureId} • Status: ${capture.status}`,
                               });
-                              await handleApprove();
+                              await refreshState(true);
+                              setCheckoutStep('SUCCESS');
+                            } catch (err) {
+                              toast.error('PayPal capture failed', {
+                                description: String(err),
+                              });
                             }
                           }}
                           onError={(err) => {

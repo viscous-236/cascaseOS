@@ -15,6 +15,7 @@ import React, { useEffect, useState } from 'react';
 import type { AgWidgetParams } from 'ag-studio';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import { formatMinorToUSD, formatVariancePct } from '@/utils/formatters';
+import { formatText, widgetAppearanceStyle, type CascadeWidgetFormat } from './widgetFormat';
 import {
   ShieldAlert,
   Sparkles,
@@ -26,9 +27,11 @@ import {
   ExternalLink
 } from 'lucide-react';
 
-export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dataMapping }) => {
+export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dataMapping, format }) => {
   const { state, openApprovalModal, activePlan, selectedReasonCode, selectReasonCode, selectedTaskId } = useCascadeState();
   const [loading, setLoading] = useState(false);
+  const widgetFormat = format as CascadeWidgetFormat | undefined;
+  const style = widgetFormat?.style;
 
   useEffect(() => {
     const fields = Object.values(dataMapping).flat() as any[];
@@ -37,10 +40,10 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dat
       return;
     }
     widgetApi.setDisplayState('loading');
-    void widgetApi.getData({ fields }, { crossFilter: 'highlight' })
+    void widgetApi.getData({ fields }, { crossFilter: widgetFormat?.crossFilter ?? 'highlight' })
       .then(() => widgetApi.setDisplayState('displayed'))
       .catch(() => widgetApi.setDisplayState('noData'));
-  }, [widgetApi, dataMapping]);
+  }, [widgetApi, dataMapping, widgetFormat?.crossFilter]);
 
   const quoteTaskId = selectedTaskId ?? activePlan?.blocked_task_id ?? state?.tasks[0]?.task_id;
   const quotes = state?.supplierQuotes.filter((quote) => quote.task_id === quoteTaskId) || [];
@@ -54,20 +57,29 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dat
 
   const handleReasonClick = (code: string) => {
     selectReasonCode(code);
+    const mapping = dataMapping as Record<string, any[] | undefined>;
+    const reasonField = mapping.reasonCode?.[0];
+    if (!reasonField || widgetFormat?.triggerCrossFilter === false) return;
     try {
-      const field = { table: 'audit', field: 'reason_code' };
       widgetApi.toggleCrossFilter({
         group: 0,
         type: 'value',
-        field,
-        values: [code],
+        field: reasonField,
+        value: code,
       } as any);
     } catch {
     }
   };
 
+  const showComparison = style?.showComparison !== false;
+  const showReasonCodes = style?.showReasonCodes !== false;
+  const showApproveButton = style?.showApproveButton !== false;
+  const headerTitle = formatText(widgetFormat?.title) ?? 'Schedule Recovery & Arbitrage';
+  const subtitle = formatText(widgetFormat?.subtitle);
+  const caption = formatText(widgetFormat?.caption);
+
   return (
-    <div className="studio-widget h-full w-full p-4 flex flex-col justify-between overflow-y-auto font-sans">
+    <div className="studio-widget h-full w-full p-4 flex flex-col justify-between overflow-y-auto font-sans" style={widgetAppearanceStyle(widgetFormat)}>
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2 mb-3">
         <div className="flex items-center space-x-2">
@@ -76,8 +88,11 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dat
           </div>
           <div>
             <h4 className="text-xs font-semibold text-neutral-900 dark:text-white uppercase tracking-wide">
-              Schedule Recovery & Arbitrage
+              {headerTitle}
             </h4>
+            {subtitle && (
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{subtitle}</p>
+            )}
           </div>
         </div>
 
@@ -87,7 +102,8 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dat
       </div>
 
       {/* Comparison Grid */}
-      <div className="grid grid-cols-2 gap-2.5 mb-3 text-xs">
+      {showComparison && (
+        <div className="grid grid-cols-2 gap-2.5 mb-3 text-xs">
         {/* Incumbent Quote */}
         <div className="p-2.5 rounded-xl bg-neutral-50 dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-800 font-mono space-y-1">
           <div className="text-[10px] text-rose-600 dark:text-rose-400 font-medium uppercase flex items-center justify-between">
@@ -118,38 +134,47 @@ export const CascadeRecoveryWidget: React.FC<AgWidgetParams> = ({ widgetApi, dat
           <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">{channel3 ? `Save ${formatMinorToUSD(channel3.savings_vs_incumbent_minor)}` : 'Awaiting live quote'}</div>
         </div>
       </div>
+      )}
 
       {/* Reason Codes Cross-Filter Pills */}
-      <div className="space-y-1 mb-3">
-        <span className="text-[10px] font-mono uppercase text-neutral-500 block">
-          Filter by Reason Code:
-        </span>
-        <div className="flex flex-wrap gap-1">
-          {reasonCodes.map((code: string) => (
-            <button
-              key={code}
-              onClick={() => handleReasonClick(code)}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
-                selectedReasonCode === code
-                  ? 'bg-neutral-900 dark:bg-white text-white dark:text-black font-medium border-transparent'
-                  : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:text-neutral-900 dark:hover:text-white'
-              }`}
-            >
-              {code}
-            </button>
-          ))}
+      {showReasonCodes && (
+        <div className="space-y-1 mb-3">
+          <span className="text-[10px] font-mono uppercase text-neutral-500 block">
+            Filter by Reason Code:
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {reasonCodes.map((code: string) => (
+              <button
+                key={code}
+                onClick={() => handleReasonClick(code)}
+                className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                  selectedReasonCode === code
+                    ? 'bg-neutral-900 dark:bg-white text-white dark:text-black font-medium border-transparent'
+                    : 'bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800 hover:text-neutral-900 dark:hover:text-white'
+                }`}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+
+      {caption && (
+        <p className="text-[10px] text-neutral-500 dark:text-neutral-400 font-mono mb-2">{caption}</p>
+      )}
 
       {/* Primary Action Button */}
-      <button
-        onClick={() => openApprovalModal()}
-        disabled={!activePlan}
-        className="w-full py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 font-medium text-xs font-mono flex items-center justify-center space-x-1.5 transition-all shadow-sm"
-      >
-        <span>Approve Reroute & Split Invoice</span>
-        <ArrowRight className="w-3.5 h-3.5" />
-      </button>
+      {showApproveButton && (
+        <button
+          onClick={() => openApprovalModal()}
+          disabled={!activePlan}
+          className="w-full py-2 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:hover:bg-neutral-200 text-white dark:text-neutral-950 font-medium text-xs font-mono flex items-center justify-center space-x-1.5 transition-all shadow-sm"
+        >
+          <span>Approve Reroute & Split Invoice</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 };

@@ -20,6 +20,7 @@ import { env } from '../config/env.js';
 import { studioAgentChatSchema } from '../schemas/apiSchemas.js';
 import { analyzeProjectBlastRadius } from '../engine/criticalPathEngine.js';
 import { searchAndAuditSupplierProducts } from '../services/channel3Service.js';
+import { executeScenario } from '../services/scenarioExecutionService.js';
 import { minorUnitsToDisplayString } from '../utils/moneyAndHash.js';
 import type { TaskDependency } from '../types/domain.js';
 
@@ -66,7 +67,7 @@ const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
     function: {
       name: 'triggerScenario',
       description:
-        'Triggers one of the three canonical CascadeOS live test scenarios (SCENARIO_A, SCENARIO_B, or SCENARIO_C).',
+        'Triggers one of the three canonical CascadeOS live test scenarios (SCENARIO_A, SCENARIO_B, or SCENARIO_C) and returns the full recovery plan and policy evaluation.',
       parameters: {
         type: 'object',
         properties: {
@@ -74,6 +75,10 @@ const AGENT_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
             type: 'string',
             enum: ['SCENARIO_A', 'SCENARIO_B', 'SCENARIO_C'],
             description: 'The scenario identifier to execute.',
+          },
+          targetTaskId: {
+            type: 'string',
+            description: 'Optional task ID to simulate the crisis on.',
           },
         },
         required: ['scenarioId'],
@@ -141,10 +146,16 @@ async function executeAgentTool(
     }
 
     case 'triggerScenario': {
-      const scenarioId = String(args.scenarioId);
+      const scenarioId = String(args.scenarioId) as 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C';
+      const targetTaskId = typeof args.targetTaskId === 'string' ? args.targetTaskId : undefined;
+      const planResult = await executeScenario(scenarioId, {
+        projectId,
+        ...(targetTaskId !== undefined ? { targetTaskId } : {}),
+      });
       return {
-        message: `Scenario ${scenarioId} initiated. Use the Scenario Trigger Bar or POST /api/scenarios/${scenarioId}/trigger to review full recovery plans.`,
+        message: `Scenario ${scenarioId} executed successfully for project ${projectId}.`,
         scenarioId,
+        planResult,
       };
     }
 

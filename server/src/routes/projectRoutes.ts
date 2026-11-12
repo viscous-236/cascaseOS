@@ -35,6 +35,7 @@ import {
 } from '../services/customProjectProvisioner.js';
 import { validateAcyclicGraph } from '../engine/dagValidator.js';
 import { analyzeProjectBlastRadius } from '../engine/criticalPathEngine.js';
+import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
 import { addDays } from '../engine/scheduleRerouter.js';
 import {
   bootstrapProjectSchema,
@@ -490,34 +491,83 @@ router.patch('/projects/:projectId/tasks/:taskId', (req: Request, res: Response)
   if (data.max_allowed_variance_pct !== undefined) patch.max_allowed_variance_pct = data.max_allowed_variance_pct;
 
   let updatedTask: CascadeTask;
+  let blastRadius!: ReturnType<typeof analyzeProjectBlastRadius>;
+  let policyResult!: ReturnType<typeof evaluateRecoveryAndSupplierAction>;
+
   withTransaction(() => {
     updatedTask = TaskRepo.update(taskId, patch);
+
+    // Recompute deterministic exposure and policy state against the persisted
+    // post-patch task graph (REQ-021). The audit ledger must contain the real
+    // decision — never a synthetic ALLOW.
+    const allTasks = TaskRepo.findByProject(projectId);
+    const dependencies = DependencyRepo.findByProject(projectId);
+    blastRadius = analyzeProjectBlastRadius(allTasks, dependencies);
+
+    const completedTaskIds = allTasks
+      .filter((t) => t.schedule_status === 'COMPLETED')
+      .map((t) => t.task_id);
+    const hardDependencies = dependencies
+      .filter((d) => d.to_task_id === taskId)
+      .map((d) => d.from_task_id);
+
+    policyResult = evaluateRecoveryAndSupplierAction({
+      taskToPromote: {
+        id: updatedTask.task_id,
+        hard_dependencies: hardDependencies,
+        materials_in_warehouse: updatedTask.materials_in_warehouse === 1,
+      },
+      completedTaskIds,
+      phaseCurrency: project.currency,
+      phaseBudgetMaxMinor: updatedTask.phase_hardware_budget_max_minor,
+      historicalUnitPriceMinor: updatedTask.historical_unit_price_minor ?? 0,
+      maxAllowedVariancePct: updatedTask.max_allowed_variance_pct,
+      proposedQuote: {
+        currency: project.currency,
+        unitPriceMinor: updatedTask.incumbent_unit_price_minor ?? 0,
+        quantity: updatedTask.required_quantity > 0 ? updatedTask.required_quantity : 1,
+        shippingMinor: 0,
+        taxMinor: 0,
+      },
+      hasExplicitUserApproval: false,
+    });
+
+    const stateFingerprint = computeStateFingerprint({
+      projectId,
+      blockedTaskId: taskId,
+      promotedTaskId: taskId,
+      invoiceId: updatedTask.paypal_invoice_id ?? `${projectId}:${taskId}`,
+      unlockAmountMinor: updatedTask.materials_unlock_minor,
+      channel3ProductId: updatedTask.sku_search_query ?? taskId,
+      supplierTotalMinor: updatedTask.invoice_total_minor,
+      currency: project.currency,
+    });
+
     getDb()
       .prepare(
         `INSERT INTO audit_events (
           event_id, project_id, task_id, event_type, decision, reason_codes_json,
           state_fingerprint, summary, payload_json, created_at
-        ) VALUES (?, ?, ?, 'TASK_UPDATED', 'ALLOW', '[]', ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, 'TASK_UPDATED', ?, ?, ?, ?, ?, ?)`
       )
       .run(
         randomUUID(),
         projectId,
         taskId,
-        `sha256_${Date.now()}`,
-        `Task "${updatedTask.name}" updated (version ${updatedTask.version}).`,
-        JSON.stringify(patch),
+        policyResult.decision,
+        JSON.stringify(policyResult.reason_codes),
+        stateFingerprint,
+        `Task "${updatedTask.name}" updated (version ${updatedTask.version}) — policy ${policyResult.decision}.`,
+        JSON.stringify({ patch, blastRadius, policyResult }),
         new Date().toISOString()
       );
   });
-
-  const allTasks = TaskRepo.findByProject(projectId);
-  const dependencies = DependencyRepo.findByProject(projectId);
-  const blastRadius = analyzeProjectBlastRadius(allTasks, dependencies);
 
   res.status(200).json({
     success: true,
     task: updatedTask!,
     blastRadius,
+    policyResult,
   });
 });
 

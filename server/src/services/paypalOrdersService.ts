@@ -13,9 +13,8 @@
  * paypal_transactions (REQ-010).
  */
 
-import { getPayPalAccessToken } from './paypalAuthService.js';
 import { formatMinorToPayPalValue } from '../utils/moneyAndHash.js';
-import { env } from '../config/env.js';
+import { paypalHttpRequest } from './paypalClient.js';
 
 // ---------------------------------------------------------------------------
 // Types (APIMatic-validated — ARC-006)
@@ -101,55 +100,13 @@ async function ordersRequest<T = unknown>(
     expectEmptyBody?: boolean;
   } = {}
 ): Promise<T> {
-  const token = await getPayPalAccessToken();
-  const url = `${env.PAYPAL_API_BASE_URL}${path}`;
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    'PayPal-Partner-Attribution-Id': 'CascadeOS-Hackathon-2026',
-  };
-
-  if (options.requestId !== undefined) {
-    headers['PayPal-Request-Id'] = options.requestId;
-  }
-
-  let response: Response;
-  const requestInit: RequestInit = {
+  const response = await paypalHttpRequest<T>({
     method,
-    headers,
-  };
-  if (options.body !== undefined) {
-    requestInit.body = JSON.stringify(options.body);
-  }
-
-  try {
-    response = await fetch(url, requestInit);
-  } catch (networkError) {
-    throw new Error(
-      `PayPalOrdersService: network error [${method} ${url}]: ${String(networkError)}`
-    );
-  }
-
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '(unreadable)');
-    throw new Error(
-      `PayPalOrdersService: [${method} ${url}] returned HTTP ${response.status}: ${errorBody}`
-    );
-  }
-
-  if (options.expectEmptyBody === true || response.status === 204) {
-    return {} as T;
-  }
-
-  try {
-    return (await response.json()) as T;
-  } catch {
-    throw new Error(
-      `PayPalOrdersService: failed to parse JSON response from [${method} ${url}]`
-    );
-  }
+    path,
+    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    ...(options.body !== undefined ? { body: options.body } : {}),
+  });
+  return response.body;
 }
 
 // ---------------------------------------------------------------------------

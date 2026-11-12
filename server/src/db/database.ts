@@ -299,9 +299,17 @@ export const TaskRepo = {
              version                = version + 1
          WHERE task_id = @task_id`
       )
-      .run({ task_id: taskId, ...patch });
+      .run({
+        task_id: taskId,
+        paypal_invoice_id: patch.paypal_invoice_id ?? null,
+        paypal_invoice_number: patch.paypal_invoice_number ?? null,
+        paypal_invoice_view_url: patch.paypal_invoice_view_url ?? null,
+        paypal_invoice_status: patch.paypal_invoice_status ?? null,
+        qr_code_base64: patch.qr_code_base64 ?? null,
+        last_nudge_message: patch.last_nudge_message ?? null,
+        last_nudge_sent_at: patch.last_nudge_sent_at ?? null,
+      });
   },
-
   /** Full task field update for interactive Bryntum editing */
   update(taskId: string, patch: Partial<CascadeTask>): CascadeTask {
     const existing = TaskRepo.findById(taskId);

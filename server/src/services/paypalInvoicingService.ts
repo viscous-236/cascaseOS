@@ -19,7 +19,7 @@
 
 import { getPayPalInvoicingAccessToken } from './paypalAuthService.js';
 import { formatMinorToPayPalValue } from '../utils/moneyAndHash.js';
-import { env } from '../config/env.js';
+import { paypalFetch, PayPalApiError, type PayPalResponse } from './paypalClient.js';
 
 // ---------------------------------------------------------------------------
 // PayPal Invoicing v2 Types (APIMatic-validated shapes — ARC-006)
@@ -128,50 +128,29 @@ async function paypalRequest<T = unknown>(
     responseType?: 'json' | 'multipart-image';
   } = {}
 ): Promise<T> {
-  const token = await getPayPalInvoicingAccessToken();
-  const url = `${env.PAYPAL_API_BASE_URL}${path}`;
-
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    Accept: options.accept ?? 'application/json',
-    'PayPal-Partner-Attribution-Id': 'CascadeOS-Hackathon-2026',
-  };
-
-  if (options.requestId !== undefined) {
-    headers['PayPal-Request-Id'] = options.requestId;
-  }
-
-  let response: Response;
-  const requestInit: RequestInit = {
-    method,
-    headers,
-  };
-  if (options.body !== undefined) {
-    requestInit.body = JSON.stringify(options.body);
-  }
-
+  let result: PayPalResponse<Response>;
   try {
-    response = await fetch(url, requestInit);
-  } catch (networkError) {
-    throw new Error(
-      `PayPalInvoicingService: network error [${method} ${url}]: ${String(networkError)}`
-    );
-  }
-
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '(unreadable)');
-    if (response.status === 403 && /NOT_AUTHORIZED|insufficient permissions/i.test(errorBody)) {
+    result = await paypalFetch<Response>({
+      method,
+      path,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+      ...(options.body !== undefined ? { body: options.body } : {}),
+      ...(options.accept !== undefined ? { accept: options.accept } : {}),
+      responseType: 'response',
+      tokenProvider: getPayPalInvoicingAccessToken,
+    });
+  } catch (error) {
+    if (error instanceof PayPalApiError && error.status === 403) {
       throw new Error(
         `PayPal Invoicing permission denied for ${method} ${path}. ` +
         'Enable the Invoicing product for this Sandbox app and use credentials belonging to the Sandbox business merchant account. ' +
-        `PayPal response: ${errorBody}`
+        `PayPal response: ${error.message}`
       );
     }
-    throw new Error(
-      `PayPalInvoicingService: [${method} ${url}] returned HTTP ${response.status}: ${errorBody}`
-    );
+    throw error;
   }
+  const response = result.body;
+  const url = path;
 
   if (options.expectEmptyBody === true || response.status === 204) {
     return {} as T;

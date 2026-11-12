@@ -15,6 +15,7 @@ import React, { useEffect, useState } from 'react';
 import type { AgWidgetParams } from 'ag-studio';
 import { useCascadeState } from '@/context/CascadeStateContext';
 import { formatMinorToUSD } from '@/utils/formatters';
+import { formatText, findMappedField, widgetAppearanceStyle, type CascadeWidgetFormat } from './widgetFormat';
 import { toast } from 'sonner';
 import {
   Trophy,
@@ -28,12 +29,14 @@ import {
   ArrowRight
 } from 'lucide-react';
 
-export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widgetApi, dataMapping }) => {
+export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widgetApi, dataMapping, format }) => {
   const { state, activePlan, openApprovalModal, approvePlan, lastNotification } = useCascadeState();
   const [nudgeText, setNudgeText] = useState(
     activePlan?.nudge_draft_text || ''
   );
   const [isSending, setIsSending] = useState(false);
+  const widgetFormat = format as CascadeWidgetFormat | undefined;
+  const style = widgetFormat?.style;
 
   useEffect(() => {
     const fields = Object.values(dataMapping).flat() as any[];
@@ -42,10 +45,10 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
       return;
     }
     widgetApi.setDisplayState('loading');
-    void widgetApi.getData({ fields }, { crossFilter: 'highlight' })
+    void widgetApi.getData({ fields }, { crossFilter: widgetFormat?.crossFilter ?? 'highlight' })
       .then(() => widgetApi.setDisplayState('displayed'))
       .catch(() => widgetApi.setDisplayState('noData'));
-  }, [widgetApi, dataMapping]);
+  }, [widgetApi, dataMapping, widgetFormat?.crossFilter]);
 
   const tasks = state?.tasks || [];
   const blockedTask = tasks.find((t) => t.schedule_status === 'PAYMENT_BLOCKED')
@@ -72,8 +75,33 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
     }
   };
 
+  const handlePaidBadgeClick = () => {
+    const mapping = dataMapping as Record<string, any[] | undefined>;
+    const invoiceStatusField =
+      findMappedField(mapping.task, 'paypal_invoice_status') ??
+      findMappedField(mapping.invoice, 'paypal_invoice_status');
+    if (!invoiceStatusField || widgetFormat?.triggerCrossFilter === false) return;
+    try {
+      widgetApi.toggleCrossFilter({
+        group: 0,
+        type: 'value',
+        field: invoiceStatusField,
+        value: 'PAID',
+      } as any);
+    } catch {
+    }
+  };
+
+  const showQrCode = style?.showQrCode !== false;
+  const showNudgeDraft = style?.showNudgeDraft !== false;
+  const showPaymentLink = style?.showPaymentLink !== false;
+  const headerTitle = formatText(widgetFormat?.title) ?? 'Client payment reminder';
+  const subtitle = formatText(widgetFormat?.subtitle);
+  const caption = formatText(widgetFormat?.caption);
+  const paidMilestones = tasks.filter((task) => task.paypal_invoice_status === 'PAID').length;
+
   return (
-    <div className="studio-widget h-full w-full p-4 flex flex-col justify-between overflow-y-auto font-sans">
+    <div className="studio-widget h-full w-full p-4 flex flex-col justify-between overflow-y-auto font-sans" style={widgetAppearanceStyle(widgetFormat)}>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 pb-2 mb-3">
         <div className="flex items-center space-x-2">
@@ -82,19 +110,28 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
           </div>
           <div>
             <h4 className="text-xs font-semibold text-neutral-900 dark:text-white uppercase tracking-wide">
-              Client payment reminder
+              {headerTitle}
             </h4>
+            {subtitle && (
+              <p className="text-[10px] text-neutral-500 dark:text-neutral-400">{subtitle}</p>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center space-x-1.5 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] font-mono font-medium">
+        <button
+          type="button"
+          onClick={handlePaidBadgeClick}
+          aria-label={`Filter dashboard to paid milestones (${paidMilestones})`}
+          className="flex items-center space-x-1.5 px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 text-[10px] font-mono font-medium hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
+        >
           <Flame className="w-3 h-3 text-amber-500" />
-          <span>{tasks.filter((task) => task.paypal_invoice_status === 'PAID').length} paid milestones</span>
-        </div>
+          <span>{paidMilestones} paid milestones</span>
+        </button>
       </div>
 
       {/* QR Code and Invoice Pill */}
-      <div className="grid grid-cols-12 gap-3 mb-3 items-center">
+      {showQrCode && (
+        <div className="grid grid-cols-12 gap-3 mb-3 items-center">
         {/* QR Code preview */}
         <div className="col-span-4 flex flex-col items-center justify-center p-2 rounded-xl bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
           {(lastNotification?.qrCodeBase64 || blockedTask?.qr_code_base64) ? (
@@ -129,6 +166,7 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
           </div>
         </div>
       </div>
+      )}
 
       <div className="grid grid-cols-1 gap-2 mb-3 text-[10px] font-mono">
         <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/20 p-2">
@@ -141,7 +179,7 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
             </details>
           )}
         </div>
-        {lastNotification?.recipientViewUrl && (
+        {showPaymentLink && lastNotification?.recipientViewUrl && (
           <a href={lastNotification.recipientViewUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-sky-200 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/20 p-2 text-sky-700 dark:text-sky-300 hover:underline">
             Open Client PayPal Payment Page ({formatMinorToUSD(lastNotification.minimumAmountDueMinor)} Minimum Due)
           </a>
@@ -149,21 +187,27 @@ export const FriendlyNudgeScoreboardWidget: React.FC<AgWidgetParams> = ({ widget
       </div>
 
       {/* Editable AI Nudge */}
-      <div className="space-y-1 mb-3">
-        <div className="flex items-center justify-between text-[10px] font-mono text-neutral-500">
-          <span className="flex items-center space-x-1">
-            <Sparkles className="w-3 h-3 text-neutral-400" />
-            <span>AI Nudge Draft:</span>
-          </span>
+      {showNudgeDraft && (
+        <div className="space-y-1 mb-3">
+          <div className="flex items-center justify-between text-[10px] font-mono text-neutral-500">
+            <span className="flex items-center space-x-1">
+              <Sparkles className="w-3 h-3 text-neutral-400" />
+              <span>AI Nudge Draft:</span>
+            </span>
+          </div>
+          <textarea
+            aria-label="Payment reminder draft"
+            rows={3}
+            value={nudgeText || blockedTask?.last_nudge_message || ''}
+            onChange={(e) => setNudgeText(e.target.value)}
+            className="w-full p-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-800 dark:text-neutral-200 text-[11px] font-sans focus:outline-none focus:border-neutral-400 leading-relaxed resize-none"
+          />
         </div>
-        <textarea
-          aria-label="Payment reminder draft"
-          rows={3}
-          value={nudgeText || blockedTask?.last_nudge_message || ''}
-          onChange={(e) => setNudgeText(e.target.value)}
-          className="w-full p-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-800 dark:text-neutral-200 text-[11px] font-sans focus:outline-none focus:border-neutral-400 leading-relaxed resize-none"
-        />
-      </div>
+      )}
+
+      {caption && (
+        <p className="text-[10px] text-neutral-500 dark:text-neutral-400 font-mono mb-2">{caption}</p>
+      )}
 
       {/* CTA Buttons */}
       <div className="flex space-x-2">

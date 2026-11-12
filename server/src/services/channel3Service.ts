@@ -15,6 +15,8 @@ import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 import { QuoteRepo } from '../db/database.js';
 import { calcVariancePct, calcSavingsMinor } from '../utils/moneyAndHash.js';
+import { recordIntegrationHttpCall } from './integrationAudit.js';
+import { redactSecrets } from '../utils/redaction.js';
 import type { CascadeTask, SupplierQuote } from '../types/domain.js';
 
 // ---------------------------------------------------------------------------
@@ -94,18 +96,39 @@ async function channel3Request<T = unknown>(
   }
 
   let response: Response;
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   try {
     response = await fetch(url, requestInit);
   } catch (networkErr) {
+    const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
+    recordIntegrationHttpCall({
+      provider: 'CHANNEL3',
+      method,
+      path,
+      status: 0,
+      latencyMs,
+      error: redactSecrets(String(networkErr)),
+    });
     throw new Error(
-      `Channel3Service: Network error [${method} ${url}]: ${String(networkErr)}`
+      redactSecrets(`Channel3Service: Network error [${method} ${path}]: ${String(networkErr)}`)
     );
   }
+
+  const latencyMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
+  recordIntegrationHttpCall({
+    provider: 'CHANNEL3',
+    method,
+    path,
+    status: response.status,
+    latencyMs,
+  });
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => '(unreadable)');
     throw new Error(
-      `Channel3Service: [${method} ${url}] returned HTTP ${response.status}: ${errorText}`
+      redactSecrets(
+        `Channel3Service: [${method} ${path}] returned HTTP ${response.status}: ${errorText}`
+      )
     );
   }
 
@@ -113,7 +136,7 @@ async function channel3Request<T = unknown>(
     return (await response.json()) as T;
   } catch {
     throw new Error(
-      `Channel3Service: Failed to parse JSON response from [${method} ${url}]`
+      `Channel3Service: Failed to parse JSON response from [${method} ${path}]`
     );
   }
 }
