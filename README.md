@@ -18,6 +18,17 @@ CascadeOS connects critical-path construction schedules, procurement intelligenc
 
 ---
 
+### ⚡ CascadeOS in 60 Seconds
+
+> 1. **The Job-Site Crisis**: A commercial fitout's Phase 2 milestone invoice ($4,500 for medical displays) is unpaid. In traditional delivery, work halts on site and specialized crews sit idle, burning **$1,200/day** while compounding contractual delay penalties.
+> 2. **The Autonomous Reroute**: Instead of letting crews sit idle, CascadeOS analyzes the project graph via Kahn's algorithm. It detects that Phase 3 (Networking) already has materials staged in the warehouse, and dynamically swaps the schedule so crews keep working today.
+> 3. **The Supplier Price Defense**: When the incumbent supplier tries to exploit the crunch by marking up displays to $490 (+28.95% creep), CascadeOS's fail-closed policy firewall **blocks** the order and queries **Channel3** to discover OEM displays at $349, saving **$564.00**.
+> 4. **The Frictionless Payment Unlock**: CascadeOS updates the **PayPal Invoicing v2** record with a partial materials threshold: the client pays just **$1,396** via PayPal to release the hardware, deferring the remaining labor balance until installation.
+>
+> ▶ **[Watch the 2:52 Demo Video](https://www.youtube.com/watch?v=cwtKS8jz7tI)** · **[View Tech Stack](#f-technology-stack)** · **[Quickstart](#j-installation-and-local-setup)**
+
+---
+
 ## Table of Contents
 
 - [A. Hero Overview](#a-hero-overview)
@@ -116,68 +127,6 @@ CascadeOS introduces continuous, payment-aware project governance across 13 core
 ▶ **[Click to Watch the Full CascadeOS Demo on YouTube (2:52)](https://www.youtube.com/watch?v=cwtKS8jz7tI)**
 
 > *This demo covers all 7 acts and sponsor integrations in under 3 minutes, following the exact production script in [`CASCADEOS_DEMO_SCRIPT.md`](CASCADEOS_DEMO_SCRIPT.md).*
-
-### Product Walkthrough Showcase
-
-```
-+--------------------------------------------------------------------------------------------------+
-|                                    1. DELIVERY OVERVIEW                                          |
-|                                                                                                  |
-| [Screenshot Placeholder: Delivery Overview & Project Switcher]                                   |
-| Relative Path: client/public/screenshots/01-delivery-overview.png                                |
-| Summary: Bento KPI cards (Critical Path Exposure, Overdue Invoices, Savings Realized) alongside  |
-| active milestone registers, crew assignments, and payment status badges.                        |
-+--------------------------------------------------------------------------------------------------+
-|                                  2. BRYNTUM GANTT 7.3 TIMELINE                                   |
-|                                                                                                  |
-| [Screenshot Placeholder: Interactive Bryntum Gantt Timeline]                                     |
-| Relative Path: client/public/screenshots/02-bryntum-gantt.png                                    |
-| Summary: Full WBS critical-path scheduling with color-coded FinOps pills (Red = Payment Blocked, |
-| Emerald = Promoted Active, Indigo = Ready to Promote), drag-and-drop dependency links.          |
-+--------------------------------------------------------------------------------------------------+
-|                               3. CHANNEL3 SUPPLIER PROCUREMENT                                   |
-|                                                                                                  |
-| [Screenshot Placeholder: Channel3 Price Arbitrage & Creep Detection]                             |
-| Relative Path: client/public/screenshots/03-channel3-procurement.png                             |
-| Summary: Live comparison table showing Incumbent quote ($490.00/unit, +28.95% creep) blocked by  |
-| policy vs. Channel3 live OEM search ($349.00/unit), realizing $564.00 net project savings.       |
-+--------------------------------------------------------------------------------------------------+
-|                             4. RECOVERY PLANS & POLICY FIREWALL                                  |
-|                                                                                                  |
-| [Screenshot Placeholder: Kahn DAG Recovery Plan & 10-Invariant Diff]                             |
-| Relative Path: client/public/screenshots/04-recovery-policy-diff.png                             |
-| Summary: Side-by-side schedule diff displaying Phase 3 promotion, Phase 2 deferral, mitigated    |
-| idle burn, and the green 10-point fail-closed policy checklist.                                  |
-+--------------------------------------------------------------------------------------------------+
-|                            5. PAYPAL CHECKOUT & INVOICE SPLIT MODAL                              |
-|                                                                                                  |
-| [Screenshot Placeholder: PayPal Smart Buttons & Invoice QR Display]                              |
-| Relative Path: client/public/screenshots/05-paypal-checkout-qr.png                               |
-| Summary: In-context PayPal JS SDK button checkout for Channel3 hardware ($1,396.00) alongside   |
-| the live PayPal Sandbox Invoicing v2 partial-payment QR code for mobile scanning.               |
-+--------------------------------------------------------------------------------------------------+
-|                               6. AI FINOPS ASSISTANT & NUDGE-BOT                                 |
-|                                                                                                  |
-| [Screenshot Placeholder: Conversational Copilot & Payment Nudge Preview]                         |
-| Relative Path: client/public/screenshots/06-ai-finops-assistant.png                              |
-| Summary: Natural-language project investigation chat powered by Groq/OpenAI, showing the drafted |
-| empathetic client payment email with partial materials unlock and live PayPal link.              |
-+--------------------------------------------------------------------------------------------------+
-|                             7. AG STUDIO 3.0 ANALYTICS DASHBOARD                                 |
-|                                                                                                  |
-| [Screenshot Placeholder: AG Studio 3.0 Embedded Report Builder]                                  |
-| Relative Path: client/public/screenshots/07-ag-studio-analytics.png                              |
-| Summary: Enterprise grid with custom CascadeRecoveryWidget, live pivot tables, and cross-filter  |
-| drill-downs linking project milestones directly to ledger line items.                            |
-+--------------------------------------------------------------------------------------------------+
-|                                  8. APPEND-ONLY AUDIT TRAIL                                      |
-|                                                                                                  |
-| [Screenshot Placeholder: SQLite Append-Only Audit Ledger]                                        |
-| Relative Path: client/public/screenshots/08-audit-trail-ledger.png                                |
-| Summary: Chronological, trigger-protected audit log showing SHA-256 state fingerprints, HTTP     |
-| outbound calls with redacted secrets, user approvals, and export to Markdown/JSON.              |
-+--------------------------------------------------------------------------------------------------+
-```
 
 ---
 
