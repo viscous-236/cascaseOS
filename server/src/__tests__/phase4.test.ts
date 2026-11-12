@@ -23,6 +23,7 @@ import {
 } from '../services/nudgeAndFinOpsAiService.js';
 import {
   bootstrapApexClinicProject,
+  getCanonicalTimeline,
   APEX_PROJECT_ID,
   CANONICAL_DEPENDENCIES,
 } from '../services/projectBootstrapService.js';
@@ -119,6 +120,18 @@ describe('Phase 4: AI Nudge-Bot & Project Bootstrap Services', () => {
   // ===========================================================================
 
   describe('TASK-018: projectBootstrapService', () => {
+    it('resolves the demo timeline relative to the anchor day', () => {
+      const timeline = getCanonicalTimeline(new Date('2026-11-12T18:30:00Z'));
+
+      expect(timeline.phase2Start).toBe('2026-11-12'); // Phase 2 starts "today"
+      expect(timeline.phase2InvoiceDueDate).toBe('2026-11-11'); // overdue by a day
+      expect(timeline.phase1End).toBe('2026-11-10'); // Phase 1 completed
+      expect(timeline.phase3Start).toBe('2026-11-15'); // promotable next
+      expect(timeline.phase6End).toBe('2026-11-20');
+      expect(timeline.phase1End < timeline.phase2Start).toBe(true);
+      expect(timeline.phase2End < timeline.phase3Start).toBe(true);
+    });
+
     it('bootstraps the 6 canonical tasks, dependencies, and incumbent quote', async () => {
       const result = await bootstrapApexClinicProject({
         skipPayPal: true,
@@ -137,6 +150,7 @@ describe('Phase 4: AI Nudge-Bot & Project Bootstrap Services', () => {
       const p2 = result.tasks.find((t) => t.task_id === 'task_phase_2_displays')!;
       expect(p2.schedule_status).toBe('PAYMENT_BLOCKED');
       expect(p2.paypal_invoice_status).toBe('OVERDUE');
+      expect(p2.start_date).toBe(getCanonicalTimeline().phase2Start);
       expect(p2.invoice_total_minor).toBe(450000);
       expect(p2.materials_unlock_minor).toBe(139600);
       expect(p2.deferred_labor_minor).toBe(310400);

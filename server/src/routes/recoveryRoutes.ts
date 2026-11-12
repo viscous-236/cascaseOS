@@ -32,6 +32,7 @@ import {
   capturePayPalOrderSchema,
 } from '../schemas/apiSchemas.js';
 import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
+import { addDays } from '../engine/scheduleRerouter.js';
 import { computeStateFingerprint, minorUnitsToDisplayString } from '../utils/moneyAndHash.js';
 import type {
   CascadeRecoveryPlan,
@@ -229,19 +230,34 @@ router.post(
         `UPDATE recovery_plans SET status = 'APPROVED' WHERE plan_id = ?`
       ).run(planId);
 
-      // Apply schedule date modifications if swapping tasks
+      // Apply schedule date modifications if swapping tasks. End dates must
+      // move with the start dates; a moved task with its old end date can
+      // otherwise render with start_date after end_date.
       if (plan.promoted_task_id !== plan.blocked_task_id) {
-        db.prepare(
-          `UPDATE tasks
-           SET start_date = ?, schedule_status = 'REROUTED_ACTIVE'
-           WHERE task_id = ?`
-        ).run(plan.new_promoted_start_date, plan.promoted_task_id);
+        const promotedEndDate = addDays(
+          plan.new_promoted_start_date,
+          promotedTask.duration_days - 1
+        );
+        const blockedEndDate = addDays(
+          plan.new_blocked_start_date,
+          blockedTask.duration_days - 1
+        );
 
         db.prepare(
           `UPDATE tasks
-           SET start_date = ?
+           SET start_date = ?, end_date = ?, schedule_status = 'REROUTED_ACTIVE'
            WHERE task_id = ?`
-        ).run(plan.new_blocked_start_date, plan.blocked_task_id);
+        ).run(
+          plan.new_promoted_start_date,
+          promotedEndDate,
+          plan.promoted_task_id
+        );
+
+        db.prepare(
+          `UPDATE tasks
+           SET start_date = ?, end_date = ?
+           WHERE task_id = ?`
+        ).run(plan.new_blocked_start_date, blockedEndDate, plan.blocked_task_id);
       }
 
        // Update blocked task with QR code, direct payment link, and nudge timestamp

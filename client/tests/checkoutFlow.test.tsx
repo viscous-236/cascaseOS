@@ -241,6 +241,25 @@ describe('TEST-014 browser checkout backend wiring', () => {
     expect(context.refreshState).toHaveBeenCalledWith(true);
   });
 
+  it('keeps the modal open on the success screen after direct approval', async () => {
+    const context = buildContext();
+    contextRef.current = context;
+
+    render(<ApprovalCheckoutModal />);
+    fireEvent.click(screen.getByText('Sign & Execute Reroute'));
+
+    await waitFor(() =>
+      expect(context.approvePlan).toHaveBeenCalledWith(
+        'VP of Construction FinOps',
+        undefined,
+        { closeModal: false }
+      )
+    );
+
+    expect(await screen.findByText('Plan Approved & Schedule Rerouted!')).toBeTruthy();
+    expect(context.closeApprovalModal).not.toHaveBeenCalled();
+  });
+
   it('skips re-approval when the plan is already APPROVED', async () => {
     const context = buildContext({ activePlan: { ...plan, status: 'APPROVED' } });
     contextRef.current = context;

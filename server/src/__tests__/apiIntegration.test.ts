@@ -23,6 +23,7 @@ import * as dbModule from '../db/database.js';
 import { clearPayPalTokenCache } from '../services/paypalAuthService.js';
 import { clearOpenAIClient } from '../services/nudgeAndFinOpsAiService.js';
 import { APEX_PROJECT_ID } from '../services/projectBootstrapService.js';
+import { addDays } from '../engine/scheduleRerouter.js';
 import { computeStateFingerprint } from '../utils/moneyAndHash.js';
 
 const paypalOrdersMock = vi.hoisted(() => ({
@@ -224,7 +225,10 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(res.body.blastRadius.idle_crew_hours).toBe(56);
       expect(res.body.blastRadius.total_exposure_minor).toBe(510000); // 366000 labor + 144000 sla
       expect(res.body.reroutedSchedule.promoted_task_id).toBe('task_phase_3_networking');
-      expect(res.body.reroutedSchedule.new_promoted_start_date).toBe('2026-10-16');
+      const blockedTask = testDb
+        .prepare(`SELECT start_date FROM tasks WHERE task_id = 'task_phase_2_displays'`)
+        .get() as { start_date: string };
+      expect(res.body.reroutedSchedule.new_promoted_start_date).toBe(blockedTask.start_date);
       expect(res.body.plan.policy_decision).toBe('REQUIRE_APPROVAL');
       expect(res.body.nudge.materials_unlock_amount_formatted).toContain('1396.00');
     }, 20000);
@@ -320,7 +324,16 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       // Verify promoted task is now REROUTED_ACTIVE
       const promoted = res.body.tasks.find((t: any) => t.task_id === 'task_phase_3_networking');
       expect(promoted.schedule_status).toBe('REROUTED_ACTIVE');
-      expect(promoted.start_date).toBe('2026-10-16');
+      expect(promoted.start_date).toBe(scenarioAPlan.new_promoted_start_date);
+      expect(promoted.end_date).toBe(
+        addDays(scenarioAPlan.new_promoted_start_date, promoted.duration_days - 1)
+      );
+
+      const blocked = res.body.tasks.find((t: any) => t.task_id === 'task_phase_2_displays');
+      expect(blocked.start_date).toBe(scenarioAPlan.new_blocked_start_date);
+      expect(blocked.end_date).toBe(
+        addDays(scenarioAPlan.new_blocked_start_date, blocked.duration_days - 1)
+      );
 
       // Verify approval recorded in SQLite
       const approvals = testDb.prepare('SELECT * FROM user_approvals').all();

@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
-
+CASCADEOS_DEMO_SCRIPT.md
+CASCADEOS_FIX_REPORT.md
+CASCADEOS_FULL_AUDIT.md
 # Build outputs
 dist/
 build/

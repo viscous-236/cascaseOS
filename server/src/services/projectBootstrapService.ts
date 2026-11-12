@@ -50,6 +50,73 @@ export interface BootstrapResult {
 }
 
 // ---------------------------------------------------------------------------
+// Demo timeline — anchored to the bootstrap day so the seeded project always
+// looks live. Offsets preserve the original relative schedule (a 1-day gap
+// after Phase 1, Phase 2 starting today, Phase 3 promotable immediately).
+// ---------------------------------------------------------------------------
+
+export interface CanonicalTimeline {
+  phase1Start: string;
+  phase1End: string;
+  phase2Start: string;
+  phase2End: string;
+  phase3Start: string;
+  phase3End: string;
+  phase4Start: string;
+  phase4End: string;
+  phase5Start: string;
+  phase5End: string;
+  phase6Start: string;
+  phase6End: string;
+  phase2InvoiceDueDate: string;
+  phase3InvoiceDueDate: string;
+}
+
+export const CANONICAL_DATE_OFFSETS = {
+  phase1Start: -4,
+  phase1End: -2,
+  phase2Start: 0,
+  phase2End: 2,
+  phase3Start: 3,
+  phase3End: 5,
+  phase4Start: 3,
+  phase4End: 4,
+  phase5Start: 6,
+  phase5End: 7,
+  phase6Start: 8,
+  phase6End: 8,
+  phase2InvoiceDueDate: -1,
+  phase3InvoiceDueDate: 9,
+} as const;
+
+/**
+ * Resolves the canonical demo schedule relative to an anchor day (UTC).
+ * Defaults to today, so a fresh bootstrap starts Phase 2 the same day.
+ */
+export function getCanonicalTimeline(anchor: Date = new Date()): CanonicalTimeline {
+  const anchorUtc = Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate());
+  const atOffset = (offsetDays: number): string =>
+    new Date(anchorUtc + offsetDays * 86_400_000).toISOString().slice(0, 10);
+
+  return {
+    phase1Start: atOffset(CANONICAL_DATE_OFFSETS.phase1Start),
+    phase1End: atOffset(CANONICAL_DATE_OFFSETS.phase1End),
+    phase2Start: atOffset(CANONICAL_DATE_OFFSETS.phase2Start),
+    phase2End: atOffset(CANONICAL_DATE_OFFSETS.phase2End),
+    phase3Start: atOffset(CANONICAL_DATE_OFFSETS.phase3Start),
+    phase3End: atOffset(CANONICAL_DATE_OFFSETS.phase3End),
+    phase4Start: atOffset(CANONICAL_DATE_OFFSETS.phase4Start),
+    phase4End: atOffset(CANONICAL_DATE_OFFSETS.phase4End),
+    phase5Start: atOffset(CANONICAL_DATE_OFFSETS.phase5Start),
+    phase5End: atOffset(CANONICAL_DATE_OFFSETS.phase5End),
+    phase6Start: atOffset(CANONICAL_DATE_OFFSETS.phase6Start),
+    phase6End: atOffset(CANONICAL_DATE_OFFSETS.phase6End),
+    phase2InvoiceDueDate: atOffset(CANONICAL_DATE_OFFSETS.phase2InvoiceDueDate),
+    phase3InvoiceDueDate: atOffset(CANONICAL_DATE_OFFSETS.phase3InvoiceDueDate),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // 6 Canonical Tasks & Dependencies
 // ---------------------------------------------------------------------------
 
@@ -70,6 +137,7 @@ export function getCanonicalTasks(
   phase3InvoiceId: string | null = null,
   phase3InvoiceNumber: string | null = null,
   phase3InvoiceViewUrl: string | null = null,
+  timeline: CanonicalTimeline = getCanonicalTimeline(),
 ): CascadeTask[] {
   return [
     {
@@ -77,8 +145,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 1: Power & Conduit Rough-In',
-      start_date: '2026-10-12',
-      end_date: '2026-10-14',
+      start_date: timeline.phase1Start,
+      end_date: timeline.phase1End,
       duration_days: 2,
       materials_in_warehouse: 1,
       crew_assigned: 'SparkTech Electricians',
@@ -110,8 +178,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 2: 4K Diagnostic Display Mounting',
-      start_date: '2026-10-16',
-      end_date: '2026-10-18',
+      start_date: timeline.phase2Start,
+      end_date: timeline.phase2End,
       duration_days: 2,
       materials_in_warehouse: 0, // Blocked on delivery
       crew_assigned: 'Display Tech Team Alpha',
@@ -143,8 +211,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 3: Acoustic Paneling & Network Rack',
-      start_date: '2026-10-19',
-      end_date: '2026-10-21',
+      start_date: timeline.phase3Start,
+      end_date: timeline.phase3End,
       duration_days: 3,
       materials_in_warehouse: 1, // Ready in warehouse!
       crew_assigned: 'NetWave Telecoms',
@@ -176,8 +244,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 4: Optical Calibration & Burn-In',
-      start_date: '2026-10-19',
-      end_date: '2026-10-20',
+      start_date: timeline.phase4Start,
+      end_date: timeline.phase4End,
       duration_days: 2,
       materials_in_warehouse: 0, // Service task — no hardware
       crew_assigned: 'Precision Optics Lab',
@@ -209,8 +277,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 5: Clinical Staff Workflow Training',
-      start_date: '2026-10-22',
-      end_date: '2026-10-23',
+      start_date: timeline.phase5Start,
+      end_date: timeline.phase5End,
       duration_days: 2,
       materials_in_warehouse: 1,
       crew_assigned: 'Clinical Operations Group',
@@ -242,8 +310,8 @@ export function getCanonicalTasks(
       project_id: APEX_PROJECT_ID,
       version: 1,
       name: 'Phase 6: Final Handover & Sign-Off',
-      start_date: '2026-10-24',
-      end_date: '2026-10-24',
+      start_date: timeline.phase6Start,
+      end_date: timeline.phase6End,
       duration_days: 1,
       materials_in_warehouse: 0,
       crew_assigned: 'CascadeOS Delivery Lead',
@@ -312,6 +380,13 @@ export async function bootstrapApexClinicProject(
 
   console.log(`[Bootstrap] Initializing ${APEX_PROJECT_NAME} (forceReset: ${Boolean(options.forceReset)})`);
 
+  // Anchor the seeded schedule to today so a freshly bootstrapped demo reads
+  // as an in-flight project: Phase 1 done, Phase 2 blocked today, later work ahead.
+  const timeline = getCanonicalTimeline();
+  console.log(
+    `[Bootstrap] Demo timeline anchored at ${timeline.phase2Start} (Phase 2 start)`
+  );
+
   let phase2InvoiceId: string | null = null;
   let phase2InvoiceNumber: string | null = 'INV-002';
   let phase2QrCode: string | null = null;
@@ -331,7 +406,7 @@ export async function bootstrapApexClinicProject(
         recipientEmail: env.PAYPAL_SANDBOX_BUYER_EMAIL,
         memo: 'Phase 2: 4K Diagnostic Display Mounting - Overdue Milestone',
         currency: DEFAULT_CURRENCY,
-        dueDate: '2026-10-15',
+        dueDate: timeline.phase2InvoiceDueDate,
         items: [
           {
             name: 'Phase 2: 4K Diagnostic Displays & Specialized Rigging',
@@ -367,7 +442,7 @@ export async function bootstrapApexClinicProject(
         recipientEmail: env.PAYPAL_SANDBOX_BUYER_EMAIL,
         memo: 'Phase 3: Acoustic Paneling & Network Rack Milestone',
         currency: DEFAULT_CURRENCY,
-        dueDate: '2026-10-25',
+        dueDate: timeline.phase3InvoiceDueDate,
         items: [
           {
             name: 'Phase 3: Network Rack & Acoustic Paneling',
@@ -397,7 +472,8 @@ export async function bootstrapApexClinicProject(
     phase2InvoiceViewUrl,
     phase3InvoiceId,
     phase3InvoiceNumber,
-    phase3InvoiceViewUrl
+    phase3InvoiceViewUrl,
+    timeline
   );
 
   const insertedData = withTransaction(() => {

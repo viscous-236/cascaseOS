@@ -129,7 +129,10 @@ export const ApprovalCheckoutModal: React.FC = () => {
     if (!activePlan || !canApprove || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const ok = await approvePlan(approverName, customNote || undefined);
+      // Keep the modal mounted so the approval result stays on screen.
+      const ok = await approvePlan(approverName, customNote || undefined, {
+        closeModal: false,
+      });
       if (ok) {
         fireCelebration();
         setCheckoutStep('SUCCESS');
@@ -807,6 +810,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                       await refreshState();
                       closeApprovalModal();
                       setCheckoutStep('DIFF');
+                      window.location.hash = 'schedule';
                     }}
                     className="px-3.5 py-1.5 rounded-xl bg-neutral-900 dark:bg-white text-white dark:text-neutral-950 font-medium hover:opacity-90 transition-colors"
                   >
