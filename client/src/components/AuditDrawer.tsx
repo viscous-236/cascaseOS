@@ -1,11 +1,11 @@
 /**
  * @file AuditDrawer.tsx
- * @description Slide-over cryptographic audit drawer and immutable compliance ledger.
+ * @description Slide-over audit drawer and immutable compliance ledger.
  *
  * Implements:
  * - TASK-030: Slide-over drawer for audit_events and paypal_transactions
  * - REQ-018: Immutable audit trails with copyable SHA-256 state fingerprints
- * - REQ-019: Export signed compliance audit report (.md / .json)
+ * - REQ-019: Export compliance audit report (.md / .json)
  * - Light and Dark theme support
  */
 
@@ -94,7 +94,7 @@ export const AuditDrawer: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.success('Signed Audit Report exported as JSON');
+    toast.success('Audit Report exported as JSON');
   };
 
   const handleExportMarkdown = () => {
@@ -107,7 +107,7 @@ export const AuditDrawer: React.FC = () => {
     md += `- Total Milestones Monitored: ${state?.tasks.length || 0}\n`;
     md += `- Audit Trail Records: ${auditEvents.length}\n`;
     md += `- PayPal Ledger Transactions: ${paypalTransactions.length}\n`;
-    md += `- Cryptographic Recovery Plans: ${state?.recoveryPlans.length || 0}\n\n`;
+    md += `- Recovery Plans: ${state?.recoveryPlans.length || 0}\n\n`;
 
     md += `## 2. Policy Decisions & Immutable Audit Ledger\n\n`;
     md += `| Timestamp | Event Type | Decision | Task ID | State Fingerprint | Summary |\n`;
@@ -134,7 +134,7 @@ export const AuditDrawer: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.success('Signed Audit Report exported as Markdown');
+    toast.success('Audit Report exported as Markdown');
   };
 
   if (!isAuditDrawerOpen) return null;
@@ -174,7 +174,7 @@ export const AuditDrawer: React.FC = () => {
                   <h3 className="text-sm font-semibold text-neutral-900 dark:text-white flex items-center space-x-2">
                     <span>Cryptographic Audit Trail</span>
                     <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-neutral-100 dark:bg-neutral-900 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-800">
-                      RFC 6960
+                      SHA-256
                     </span>
                   </h3>
                   <p className="text-[11px] text-neutral-500">
@@ -215,7 +215,7 @@ export const AuditDrawer: React.FC = () => {
                   }`}
                 >
                   <CreditCard className="w-3.5 h-3.5" />
-                  <span>PayPal ({paypalTransactions.length})</span>
+                  <span>PayPal activity ({paypalTransactions.length})</span>
                 </button>
               </div>
 
@@ -383,7 +383,7 @@ export const AuditDrawer: React.FC = () => {
 
             {/* Footer */}
             <div className="p-3.5 bg-neutral-50 dark:bg-neutral-950/90 border-t border-neutral-200 dark:border-white/[0.08] text-[11px] font-mono text-neutral-500 flex items-center justify-between">
-              <span>Integrity: HMAC SHA-256</span>
+              <span>State binding: SHA-256</span>
               <span>Fail-Closed Firewall</span>
             </div>
           </motion.div>

@@ -598,7 +598,7 @@ export function CascadeStateProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      const toastId = toast.loading('Submitting cryptographic approval...', {
+      const toastId = toast.loading('Submitting fingerprint-bound approval...', {
         description: 'Verifying SHA-256 state fingerprint & splitting PayPal Sandbox invoice',
       });
 

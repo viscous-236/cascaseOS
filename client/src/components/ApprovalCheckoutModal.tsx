@@ -3,7 +3,7 @@
  * @description Production Deterministic Policy Diff & PayPal Sandbox Checkout Modal.
  *
  * Implements:
- * - TASK-029: Cryptographic Approval with SHA-256 fingerprint validation
+ * - TASK-029: Fingerprint-bound approval with SHA-256 state validation
  * - REQ-010: Side-by-side Deterministic Policy Diff (Permitted vs Observed)
  * - REQ-011: Split PayPal Invoice & Live PayPal Sandbox QR Code
  * - REQ-017: Live PayPal Buttons capture with canvas-confetti burst
@@ -268,7 +268,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                     <Lock className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
                     <div>
                       <div className="text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
-                        State Fingerprint (SHA-256 Non-Repudiation)
+                        State Fingerprint (SHA-256 Approval Binding)
                       </div>
                       <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 font-medium break-all">
                         {activePlan.state_fingerprint}
@@ -314,7 +314,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                       </span>
                     </div>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-200/60 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-                      RFC-6960 Invariant Matrix
+                      Policy Invariant Matrix
                     </span>
                   </div>
 
@@ -790,7 +790,7 @@ export const ApprovalCheckoutModal: React.FC = () => {
                 </div>
                 <h3 className="text-base font-semibold text-neutral-900 dark:text-white">Plan Approved & Schedule Rerouted!</h3>
                 <p className="text-xs text-neutral-600 dark:text-neutral-300 max-w-md mx-auto leading-relaxed">
-                  The schedule reroute has been cryptographically signed. The promoted milestone is now active.
+                  The schedule reroute is bound to the approved SHA-256 state fingerprint. The promoted milestone is now active.
                 </p>
                 <div className="pt-2 flex justify-center space-x-2 font-mono text-xs">
                   <button

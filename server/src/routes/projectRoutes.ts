@@ -269,6 +269,25 @@ router.get('/projects/:projectId/state', (req: Request, res: Response): void => 
     )
     .get(projectId);
 
+  // Compliance exports need the full lifecycle, including executed/blocked/
+  // superseded plans and the approval records that authorized them.
+  const recoveryPlans = db
+    .prepare<[string], CascadeRecoveryPlan>(
+      `SELECT * FROM recovery_plans
+       WHERE project_id = ?
+       ORDER BY created_at DESC`
+    )
+    .all(projectId);
+
+  const userApprovals = db
+    .prepare<[string], { approval_id: string; plan_id: string; approved_fingerprint: string; approver_actor: string; approved_at: string }>(
+      `SELECT ua.* FROM user_approvals ua
+       JOIN recovery_plans rp ON rp.plan_id = ua.plan_id
+       WHERE rp.project_id = ?
+       ORDER BY ua.approved_at DESC`
+    )
+    .all(projectId);
+
   const paypalTransactions = db
     .prepare<[string], PayPalTransactionRecord>(
       `SELECT * FROM paypal_transactions
@@ -291,6 +310,8 @@ router.get('/projects/:projectId/state', (req: Request, res: Response): void => 
     dependencies,
     supplierQuotes,
     activeRecoveryPlan: activeRecoveryPlan ?? null,
+    recoveryPlans,
+    userApprovals,
     paypalTransactions,
     auditEvents,
   });
@@ -371,7 +392,7 @@ router.post('/projects/:projectId/tasks', async (req: Request, res: Response): P
         randomUUID(),
         projectId,
         taskId,
-        `sha256_${Date.now()}`,
+        null,
         `Task "${newTask.name}" added to project.`,
         JSON.stringify({ taskId, name: newTask.name }),
         new Date().toISOString()
@@ -637,7 +658,7 @@ router.post('/projects/:projectId/dependencies', (req: Request, res: Response): 
         randomUUID(),
         projectId,
         to_task_id,
-        `sha256_${Date.now()}`,
+        null,
         `Finish-to-start dependency created: ${from_task_id} -> ${to_task_id}`,
         JSON.stringify({ from_task_id, to_task_id, lag_days }),
         new Date().toISOString()

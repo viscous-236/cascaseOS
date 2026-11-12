@@ -155,6 +155,14 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TEXT NOT NULL
 );
 
+-- PayPal retries webhook deliveries. This table makes reconciliation idempotent:
+-- a repeated PayPal event ID is acknowledged without re-applying state.
+CREATE TABLE IF NOT EXISTS processed_webhook_events (
+  event_id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  processed_at TEXT NOT NULL
+);
+
 -- =============================================================================
 -- APPEND-ONLY AUDIT LEDGER TRIGGERS (SEC-007)
 -- These triggers enforce that audit_events rows can NEVER be modified

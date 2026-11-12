@@ -787,6 +787,58 @@ describe('Phase 3: PayPal Sandbox Integration & Services', () => {
       expect(response.body).toEqual({ received: true });
     });
 
+    it('acknowledges a duplicate PayPal event ID without duplicating state or audit rows', async () => {
+      const event = {
+        id: 'WH-EVT-DUPLICATE-001',
+        event_type: 'INVOICING.INVOICE.PAID',
+        resource: { id: 'INV2-PHASE-2-TEST', status: 'PAID' },
+      };
+
+      const first = await request(app).post('/api/webhooks/paypal').send(event);
+      expect(first.status).toBe(200);
+      expect(first.body).toEqual({ received: true });
+
+      const second = await request(app).post('/api/webhooks/paypal').send(event);
+      expect(second.status).toBe(200);
+      expect(second.body).toEqual({ received: true, duplicate: true });
+
+      const audits = testDb
+        .prepare("SELECT COUNT(*) AS count FROM audit_events WHERE event_type = 'WEBHOOK_INVOICE_PAID'")
+        .get() as { count: number };
+      expect(audits.count).toBe(1);
+      const processed = testDb
+        .prepare('SELECT COUNT(*) AS count FROM processed_webhook_events WHERE event_id = ?')
+        .get(event.id) as { count: number };
+      expect(processed.count).toBe(1);
+    });
+
+    it('fails closed when PAYPAL_WEBHOOK_ID is missing outside test mode', async () => {
+      const originalWebhookId = env.PAYPAL_WEBHOOK_ID;
+      const originalNodeEnv = env.NODE_ENV;
+      (env as Record<string, unknown>)['PAYPAL_WEBHOOK_ID'] = '';
+      (env as Record<string, unknown>)['NODE_ENV'] = 'production';
+
+      try {
+        const response = await request(app)
+          .post('/api/webhooks/paypal')
+          .send({
+            id: 'WH-EVT-UNVERIFIED-PROD',
+            event_type: 'INVOICING.INVOICE.PAID',
+            resource: { id: 'INV2-PHASE-2-TEST', status: 'PAID' },
+          });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ error: 'Invalid PayPal webhook signature' });
+        const task = testDb
+          .prepare("SELECT paypal_invoice_status FROM tasks WHERE task_id = 'task_phase_2_displays'")
+          .get() as { paypal_invoice_status: string };
+        expect(task.paypal_invoice_status).toBe('OVERDUE');
+      } finally {
+        (env as Record<string, unknown>)['PAYPAL_WEBHOOK_ID'] = originalWebhookId;
+        (env as Record<string, unknown>)['NODE_ENV'] = originalNodeEnv;
+      }
+    });
+
     it('verifies signature via PayPal verification endpoint when PAYPAL_WEBHOOK_ID is configured', async () => {
       const originalWebhookId = env.PAYPAL_WEBHOOK_ID;
       (env as Record<string, unknown>)['PAYPAL_WEBHOOK_ID'] = 'WH-CONFIGURED-ID-123';

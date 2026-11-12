@@ -70,11 +70,19 @@ async function verifyWebhookSignature(
   req: Request,
   eventBody: unknown
 ): Promise<boolean> {
-  // PAYPAL_WEBHOOK_ID is optional in dev (env.ts marks it optional)
+  // PAYPAL_WEBHOOK_ID is optional in env.ts, but verification must never be
+  // skipped by accident. Test mode is the only automatic bypass; every other
+  // environment fails closed until a real webhook ID is configured.
   const webhookId = env.PAYPAL_WEBHOOK_ID;
   if (webhookId === undefined || webhookId === '' || webhookId.startsWith('your_')) {
-    // In local dev without a registered webhook, log and skip
-    return true;
+    if (env.NODE_ENV === 'test') {
+      console.warn('[Webhook] PAYPAL_WEBHOOK_ID not configured; allowing unverified event in test mode');
+      return true;
+    }
+    console.error(
+      '[Webhook] PAYPAL_WEBHOOK_ID is not configured. Refusing to process an unverified PayPal webhook.'
+    );
+    return false;
   }
 
   const transmissionId = req.headers['paypal-transmission-id'];
@@ -261,6 +269,13 @@ function reconcileWebhookEvent(event: PayPalWebhookEvent): void {
         // Unknown event type — log but don't fail
         console.log(`[Webhook] Unhandled event type: ${event.event_type}`);
     }
+
+    // Mark the PayPal event as processed inside the same transaction as the
+    // state mutation. A retry with the same event ID is a harmless replay.
+    db.prepare(
+      `INSERT INTO processed_webhook_events (event_id, event_type, processed_at)
+       VALUES (?, ?, ?)`
+    ).run(event.id, event.event_type, now);
   })();
 }
 
@@ -296,13 +311,30 @@ router.post('/paypal', async (req: Request, res: ExpressResponse): Promise<void>
     return;
   }
 
-  // Reconcile event into SQLite (fail closed — log error, still return 200
-  // to prevent PayPal from retrying a non-idempotent event)
+  if (!eventBody || typeof eventBody.id !== 'string' || eventBody.id.length === 0) {
+    res.status(400).json({ error: 'PayPal webhook event is missing its id' });
+    return;
+  }
+
+  // Idempotency: PayPal may deliver the same event more than once.
+  const existing = getDb()
+    .prepare<[string], { event_id: string }>(
+      'SELECT event_id FROM processed_webhook_events WHERE event_id = ?'
+    )
+    .get(eventBody.id);
+  if (existing) {
+    res.status(200).json({ received: true, duplicate: true });
+    return;
+  }
+
   try {
     reconcileWebhookEvent(eventBody);
   } catch (err) {
     console.error('[Webhook] Reconciliation error:', err);
-    // Return 200 to stop PayPal retries; the error is already logged
+    // Let PayPal retry. Reconciliation is now idempotent, so a retry cannot
+    // duplicate state changes or audit rows.
+    res.status(500).json({ error: 'Webhook reconciliation failed; retry expected' });
+    return;
   }
 
   res.status(200).json({ received: true });

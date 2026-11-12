@@ -201,6 +201,15 @@ describe('Dynamic Multi-Tenant Project Onboarding & Task CRUD API', () => {
       expect(addRes.status).toBe(201);
       expect(addRes.body.success).toBe(true);
       expect(addRes.body.task.name).toBe('Phase 3 Commissioning');
+
+      // Creation events are not approval-bound. They must not fabricate a
+      // hash-like timestamp in the fingerprint column.
+      const audit = testDb
+        .prepare(
+          "SELECT state_fingerprint FROM audit_events WHERE event_type = 'TASK_CREATED' AND task_id = ?"
+        )
+        .get(addRes.body.task.task_id) as { state_fingerprint: string | null };
+      expect(audit.state_fingerprint).toBeNull();
     });
 
     it('prevents adding a dependency that introduces a cycle (SEC-101)', async () => {

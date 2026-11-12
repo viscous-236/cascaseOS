@@ -349,7 +349,7 @@ export const TaskFinancialsDrawer: React.FC = () => {
                         PayPal Instant Checkout QR
                       </span>
                       <span className="text-[10px] text-neutral-500 font-mono">
-                        Scan to unlock ${task.materials_unlock_minor / 100} in Sandbox
+                        Scan to unlock {formatMinorToUSD(task.materials_unlock_minor)} in Sandbox
                       </span>
                     </div>
                     <img

@@ -4,7 +4,7 @@
  *
  * Implements:
  * - Supplier Arbitrage: Incumbent Quote vs Live Channel3 Discovery
- * - Deterministic Policy Diff & RFC 6960 state signatures
+ * - Deterministic Policy Diff & SHA-256 state fingerprints
  * - PayPal Split Invoice Architecture
  * - Decongested, minimal layout with full Dark & Light theme support
  */

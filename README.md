@@ -23,7 +23,7 @@ In commercial construction, EPC contracting, IT buildouts, and high-stakes capit
 3. **Live Per-Task PayPal Sandbox Invoicing v2**: Automatically provisions genuine PayPal Sandbox invoices for project milestones with direct links, partial payment unlock thresholds (`allow_partial_payment: true`), and live Base64 QR codes.
 4. **Channel3 Live Product Graph Arbitrage**: Programmatically queries Channel3's real retail graph for hardware SKUs, detects supplier price-creep (>10% variance, e.g., +28.95%), locks incumbent orders, and drafts replacement orders saving $564.00 (28.78%).
 5. **Interactive Bryntum Gantt CRUD & FinOps Drawer**: Drag, resize, and edit task dates live in Bryntum Gantt with automatic SQLite persistence; double-click any phase to open the **Phase Financials & Hardware Drawer** to toggle warehouse staging, inspect PayPal invoices, or trigger on-demand price audits.
-6. **Deterministic Policy Firewall**: A fail-closed 10-invariant rule engine running independently of the LLM. It generates RFC 6960 SHA-256 non-repudiation fingerprints over canonical financial states to prevent hallucinated payouts or unauthorized dependency bypasses.
+6. **Deterministic Policy Firewall**: A fail-closed 10-invariant rule engine running independently of the LLM. It computes deterministic SHA-256 state fingerprints over canonical financial states to bind approvals to the reviewed proposal and prevent hallucinated payouts or unauthorized dependency bypasses. These fingerprints are an approval-binding mechanism, not a digital signature, HMAC, or RFC 6960 certificate.
 
 ---
 
@@ -171,7 +171,7 @@ The policy firewall (`server/src/engine/policyEngine.ts`) guarantees safety inde
 | `STALE_FINGERPRINT_APPROVAL` | Rejects approvals if underlying state mutated after plan generation. | `BLOCK` (409) |
 | `APPEND_ONLY_AUDIT_LEDGER` | SQLite triggers abort any `UPDATE` or `DELETE` on `audit_events`. | `ABORT` (500) |
 | `INTEGER_MINOR_UNITS` | All arithmetic evaluated as integer cents ($1,396.00 = `139600`). | Strict Type |
-| `REQUIRE_APPROVAL` | Valid promotion scenarios require human cryptographic sign-off. | `REQUIRE_APPROVAL` |
+| `REQUIRE_APPROVAL` | Valid promotion scenarios require human fingerprint-bound sign-off. | `REQUIRE_APPROVAL` |
 
 ---
 
@@ -324,7 +324,7 @@ Once the app is running at `http://localhost:5173`, follow these steps to verify
 | **7. Test Scenario A** | Click **"Scenario A"** in the top bar. | Phase 2 invoice is flagged as overdue, blast radius calculates idle crew exposure ($5,100.00), and Phase 3 is promoted with a $1,396 split plan. |
 | **8. PayPal Checkout Capture** | Click **"Review Policy & Checkout"** in Scenario A. | Opens the PayPal checkout modal displaying the deterministic policy diff and live PayPal Smart Buttons to execute Orders v2 capture. |
 | **9. Test Scenario B** | Click **"Scenario B"** in the top bar. | Incumbent quote (+28.95% creep) is blocked, Channel3 product graph is queried, and a $564.00 savings arbitrage plan is drafted. |
-| **10. Audit Ledger** | Click **"Audit"** in the top bar. | Opens the cryptographic audit drawer showing immutable SHA-256 event logs with one-click Markdown/JSON export. |
+| **10. Audit Ledger** | Click **"Audit"** in the top bar. | Opens the audit drawer showing append-only SHA-256 event fingerprints with one-click Markdown/JSON export. |
 
 ---
 
@@ -386,7 +386,7 @@ cascadeOS/
 ## 10. APIMatic Integration & Typed Transport Architecture (ARC-006, TASK-040)
 
 CascadeOS implements typed API transport bindings for the PayPal Sandbox REST API:
-- **Typed HTTP Client**: [`server/src/services/paypalClient.ts`](server/src/services/paypalClient.ts) encapsulates typed headers, scoped authentication tokens (`invoicing` vs default), and RFC 6960 state signatures.
+- **Typed HTTP Client**: [`server/src/services/paypalClient.ts`](server/src/services/paypalClient.ts) encapsulates typed headers, scoped authentication tokens (`invoicing` vs default), and deterministic SHA-256 state fingerprints for approval binding.
 - **Credential Redaction**: [`server/src/utils/redaction.ts`](server/src/utils/redaction.ts) scrubs bearer tokens, authorization headers, and API keys before logging (`SEC-008`).
 - **Observability**: Outbound HTTP status and roundtrip latency are recorded in `audit_events` (`GUD-006`) via [`integrationAudit.ts`](server/src/services/integrationAudit.ts).
 - **APIMatic SDK Generation**: Documented in [`docs/apimatic.md`](docs/apimatic.md) with an automated generation script [`server/scripts/generate-paypal-client.sh`](server/scripts/generate-paypal-client.sh) consuming PayPal OpenAPI definitions.

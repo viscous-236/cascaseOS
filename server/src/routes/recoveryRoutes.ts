@@ -35,6 +35,7 @@ import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
 import { computeStateFingerprint, minorUnitsToDisplayString } from '../utils/moneyAndHash.js';
 import type {
   CascadeRecoveryPlan,
+  PayPalTransactionRecord,
   SupplierQuote,
   TaskDependency,
 } from '../types/domain.js';
@@ -72,6 +73,28 @@ router.post(
 
     if (!plan) {
       res.status(404).json({ error: `Recovery plan '${planId}' not found` });
+      return;
+    }
+
+    // Approval is a one-way state transition. Never re-run PayPal side effects
+    // or append a second approval/audit event for an already-approved plan.
+    if (plan.status !== 'PROPOSED') {
+      res.status(409).json({
+        error: `Recovery plan is ${plan.status}; only PROPOSED plans can be approved`,
+        status: plan.status,
+      });
+      return;
+    }
+    const existingApproval = db
+      .prepare<[string], { approval_id: string }>(
+        'SELECT approval_id FROM user_approvals WHERE plan_id = ? LIMIT 1'
+      )
+      .get(planId);
+    if (existingApproval) {
+      res.status(409).json({
+        error: 'Recovery plan already has a recorded approval',
+        status: plan.status,
+      });
       return;
     }
 
@@ -391,9 +414,11 @@ router.post(
       },
       completedTaskIds,
        phaseCurrency: quote.currency,
-      phaseBudgetMaxMinor: task.phase_hardware_budget_max_minor || 160000,
-      historicalUnitPriceMinor: task.historical_unit_price_minor || 38000,
-      maxAllowedVariancePct: task.max_allowed_variance_pct || 10.0,
+      // Use persisted values. A missing/zero budget or baseline must fail
+      // closed rather than inherit a demo fallback.
+      phaseBudgetMaxMinor: task.phase_hardware_budget_max_minor ?? 0,
+      historicalUnitPriceMinor: task.historical_unit_price_minor ?? 0,
+      maxAllowedVariancePct: task.max_allowed_variance_pct ?? 10.0,
       proposedQuote: {
         currency: quote.currency,
         unitPriceMinor: quote.unit_price_minor,
@@ -516,6 +541,38 @@ router.post(
       res.status(404).json({ error: 'Recovery plan does not belong to capture task project' });
       return;
     }
+    // A capture must refer to an order that CascadeOS itself created for this
+    // task (and, when supplied, this plan). Never trust a body taskId on its own.
+    const orderRecord = db
+      .prepare<[string], PayPalTransactionRecord>(
+        `SELECT * FROM paypal_transactions
+         WHERE kind = 'ORDER_CREATE' AND paypal_resource_id = ?
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(orderId);
+    if (!orderRecord) {
+      res.status(404).json({ error: `No CascadeOS order record found for '${orderId}'` });
+      return;
+    }
+    if (orderRecord.task_id !== taskId || orderRecord.project_id !== task.project_id) {
+      res.status(409).json({ error: 'PayPal order does not belong to the requested task' });
+      return;
+    }
+    if (planId && orderRecord.plan_id !== planId) {
+      res.status(409).json({ error: 'PayPal order does not belong to the requested recovery plan' });
+      return;
+    }
+    const priorCapture = db
+      .prepare<[string], { transaction_record_id: string }>(
+        `SELECT transaction_record_id FROM paypal_transactions
+         WHERE kind = 'ORDER_CAPTURE' AND paypal_resource_id = ? LIMIT 1`
+      )
+      .get(orderId);
+    if (priorCapture) {
+      res.status(409).json({ error: 'PayPal order has already been captured' });
+      return;
+    }
+
     const projectCurrency = ProjectRepo.findById(task.project_id)?.currency ?? 'USD';
 
     try {

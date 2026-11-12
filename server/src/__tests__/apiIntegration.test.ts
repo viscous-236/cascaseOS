@@ -327,6 +327,55 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
       expect(approvals).toHaveLength(1);
     });
 
+    it('rejects a repeated approval with 409 and writes no duplicate approval', async () => {
+      const approvalBody = {
+        approvedFingerprint: scenarioAPlan.state_fingerprint,
+        approverActor: 'Supervisor Vance',
+      };
+      const first = await request(app)
+        .post(`/api/recovery-plans/${scenarioAPlan.plan_id}/approve-schedule-and-split`)
+        .send(approvalBody);
+      expect(first.status).toBe(200);
+
+      const second = await request(app)
+        .post(`/api/recovery-plans/${scenarioAPlan.plan_id}/approve-schedule-and-split`)
+        .send(approvalBody);
+      expect(second.status).toBe(409);
+
+      const approvals = testDb.prepare('SELECT COUNT(*) AS count FROM user_approvals').get() as { count: number };
+      expect(approvals.count).toBe(1);
+      const auditRows = testDb
+        .prepare("SELECT COUNT(*) AS count FROM audit_events WHERE plan_id = ? AND event_type = 'PLAN_APPROVED_SCHEDULE_SPLIT'")
+        .get(scenarioAPlan.plan_id) as { count: number };
+      expect(auditRows.count).toBe(1);
+    });
+
+    it('returns executed recovery plans and approvals in project state for compliance export', async () => {
+      const approval = await request(app)
+        .post(`/api/recovery-plans/${scenarioAPlan.plan_id}/approve-schedule-and-split`)
+        .send({
+          approvedFingerprint: scenarioAPlan.state_fingerprint,
+          approverActor: 'Supervisor Vance',
+        });
+      expect(approval.status).toBe(200);
+
+      // Simulate the execution phase. The state endpoint must expose all plan
+      // statuses, including plans that are no longer active.
+      testDb
+        .prepare("UPDATE recovery_plans SET status = 'EXECUTED' WHERE plan_id = ?")
+        .run(scenarioAPlan.plan_id);
+
+      const stateRes = await request(app).get(`/api/projects/${APEX_PROJECT_ID}/state`);
+      expect(stateRes.status).toBe(200);
+      const executedPlan = stateRes.body.recoveryPlans.find(
+        (plan: any) => plan.plan_id === scenarioAPlan.plan_id
+      );
+      expect(executedPlan?.status).toBe('EXECUTED');
+      expect(stateRes.body.userApprovals).toHaveLength(1);
+      expect(stateRes.body.userApprovals[0].plan_id).toBe(scenarioAPlan.plan_id);
+      expect(stateRes.body.userApprovals[0].approver_actor).toBe('Supervisor Vance');
+    });
+
     /**
      * Scenario A's persisted incumbent quote is intentionally over budget, so
      * order-level tests replace it with a compliant Channel3-shaped quote and
@@ -451,6 +500,53 @@ describe('Phase 5: Express REST API & Scenario Orchestration', () => {
         .prepare('SELECT schedule_status FROM tasks WHERE task_id = ?')
         .get(taskId) as { schedule_status: string };
       expect(taskRow.schedule_status).toBe('MATERIALS_ORDERED');
+
+      // A capture must never be replayable.
+      const duplicateCapture = await request(app)
+        .post('/api/paypal/orders/5O190127TN364715T/capture')
+        .send({ taskId });
+      expect(duplicateCapture.status).toBe(409);
+      expect(paypalOrdersMock.captureSupplierOrder).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects capture of an order that CascadeOS did not create', async () => {
+      const { taskId } = await prepareCompliantApprovedOrder();
+
+      const res = await request(app)
+        .post('/api/paypal/orders/FOREIGN-SANDBOX-ORDER/capture')
+        .send({ taskId });
+
+      expect(res.status).toBe(404);
+      expect(paypalOrdersMock.captureSupplierOrder).not.toHaveBeenCalled();
+    });
+
+    it('rejects capture when the stored order belongs to a different task', async () => {
+      const { quote, taskId, fingerprint } = await prepareCompliantApprovedOrder();
+      paypalOrdersMock.createSupplierOrder.mockResolvedValue({
+        id: 'ORDER-OWNED-BY-PHASE-2',
+        status: 'CREATED',
+      });
+
+      const createRes = await request(app)
+        .post('/api/paypal/orders/create')
+        .send({
+          planId: scenarioAPlan.plan_id,
+          taskId,
+          quoteId: quote.quote_id,
+          approvedFingerprint: fingerprint,
+          expectedTotalMinor: 139600,
+        });
+      expect(createRes.status).toBe(201);
+
+      const otherTask = testDb
+        .prepare('SELECT task_id FROM tasks WHERE task_id != ? LIMIT 1')
+        .get(taskId) as { task_id: string };
+      const res = await request(app)
+        .post('/api/paypal/orders/ORDER-OWNED-BY-PHASE-2/capture')
+        .send({ taskId: otherTask.task_id });
+
+      expect(res.status).toBe(409);
+      expect(paypalOrdersMock.captureSupplierOrder).not.toHaveBeenCalled();
     });
 
     it('rejects an order when the client expected total does not match the persisted quote', async () => {

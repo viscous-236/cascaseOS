@@ -246,8 +246,11 @@ export async function searchAndAuditSupplierProducts(
       currency: offer?.price?.currency ?? 'USD',
       unit_price_minor: unitPriceMinor,
       quantity,
-      shipping_minor: 0,
-      tax_minor: 0,
+      // Channel3 offers do not quote delivered freight or tax. Persist the
+      // documented unknown sentinel (null), never zero: the policy engine must
+      // fail closed with UNKNOWN_COST_FIELD until these costs are known.
+      shipping_minor: null,
+      tax_minor: null,
       total_minor: totalMinor,
       variance_vs_historical_pct: varianceVsHistorical,
       savings_vs_incumbent_minor: savingsVsIncumbent,

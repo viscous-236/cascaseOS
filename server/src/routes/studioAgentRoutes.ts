@@ -147,7 +147,13 @@ async function executeAgentTool(
 
     case 'triggerScenario': {
       const scenarioId = String(args.scenarioId) as 'SCENARIO_A' | 'SCENARIO_B' | 'SCENARIO_C';
+      if (!['SCENARIO_A', 'SCENARIO_B', 'SCENARIO_C'].includes(scenarioId)) {
+        return { error: `Unknown scenario '${scenarioId}'. Expected SCENARIO_A, SCENARIO_B, or SCENARIO_C.` };
+      }
       const targetTaskId = typeof args.targetTaskId === 'string' ? args.targetTaskId : undefined;
+      if (targetTaskId && !tasks.some((task) => task.task_id === targetTaskId)) {
+        return { error: `Target task '${targetTaskId}' does not belong to project '${projectId}'.` };
+      }
       const planResult = await executeScenario(scenarioId, {
         projectId,
         ...(targetTaskId !== undefined ? { targetTaskId } : {}),
@@ -184,14 +190,61 @@ router.post('/studio-agent/chat', async (req: Request, res: Response): Promise<v
     ...(env.OPENAI_BASE_URL ? { baseURL: env.OPENAI_BASE_URL } : {}),
   });
 
+  // Ground the model in the authoritative SQLite state for this project. The
+  // prompt must never carry demo amounts from another project.
+  const project = ProjectRepo.findById(projectId);
+  const projectTasks = TaskRepo.findByProject(projectId);
+  const projectSnapshot = {
+    project: project
+      ? { project_id: project.project_id, name: project.name, currency: project.currency }
+      : null,
+    tasks: projectTasks.map((task) => ({
+      task_id: task.task_id,
+      name: task.name,
+      start_date: task.start_date,
+      end_date: task.end_date,
+      duration_days: task.duration_days,
+      schedule_status: task.schedule_status,
+      paypal_invoice_status: task.paypal_invoice_status,
+      invoice_total_minor: task.invoice_total_minor,
+      materials_unlock_minor: task.materials_unlock_minor,
+      deferred_labor_minor: task.deferred_labor_minor,
+      materials_in_warehouse: task.materials_in_warehouse,
+      daily_idle_burn_minor: task.daily_idle_burn_minor,
+      sla_delay_penalty_minor: task.sla_delay_penalty_minor,
+    })),
+    active_recovery_plan: getDb()
+      .prepare(
+        `SELECT plan_id, status, policy_decision, blocked_task_id, promoted_task_id,
+                total_exposure_minor, immediate_unlock_minor, deferred_labor_minor
+         FROM recovery_plans
+         WHERE project_id = ? AND status IN ('PROPOSED', 'APPROVED')
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(projectId) ?? null,
+    supplier_quotes: getDb()
+      .prepare(
+        `SELECT quote_id, task_id, source_type, product_title, merchant_name,
+                unit_price_minor, quantity, shipping_minor, tax_minor, total_minor,
+                availability_status, observed_at
+         FROM supplier_quotes
+         WHERE task_id IN (SELECT task_id FROM tasks WHERE project_id = ?)
+         ORDER BY observed_at DESC LIMIT 20`
+      )
+      .all(projectId),
+  };
+
   const systemMessage: OpenAI.Chat.Completions.ChatCompletionMessageParam = {
     role: 'system',
     content: `You are CascadeOS FinOps Agent, the autonomous intelligence embedded in AG Studio 3.0.
 Your role:
 - Guide construction and fitout supervisors through payment-coupled schedule rerouting and supplier arbitrage.
-- You have access to real tools: inspectBlastRadius, refreshChannel3Quotes, and triggerScenario.
+- You have access to real tools: inspectBlastRadius, auditSupplierQuoteWithChannel3, and triggerScenario.
 - Keep responses concise, professional, data-driven, and focused on protecting opening dates and minimizing cash exposure.
-- Reference exact numbers (e.g., $2,800.00 idle exposure, $1,396.00 materials unlock, $564.00 Channel3 savings).`,
+- Use only the authoritative project snapshot below for amounts and status. Never reuse numbers from another project or from examples. If the snapshot does not contain a value, say it is unknown.
+- triggerScenario changes project state. Only call it when the user explicitly asks to run or simulate a scenario.
+Authoritative project snapshot (SQLite):
+${JSON.stringify(projectSnapshot)}`,
   };
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -226,6 +279,7 @@ Your role:
       const choice = response.choices[0];
       const responseMessage = choice?.message;
 
+      const toolMessages: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] = [];
       if (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0) {
         for (const toolCall of responseMessage.tool_calls) {
           sendEvent('TOOL_CALL_START', {
@@ -242,6 +296,11 @@ Your role:
           }
 
            const toolResult = await executeAgentTool(toolCall.function.name, parsedArgs, projectId);
+           toolMessages.push({
+             role: 'tool',
+             tool_call_id: toolCall.id,
+             content: JSON.stringify(toolResult),
+           });
 
           sendEvent('TOOL_CALL_END', {
             toolCallId: toolCall.id,
@@ -251,7 +310,17 @@ Your role:
         }
       }
 
-      const text = responseMessage?.content || 'FinOps analysis complete.';
+      // Send tool results back to the model so the narrative is grounded in
+      // what actually happened, not in the pre-tool guess.
+      let text = responseMessage?.content || '';
+      if (toolMessages.length > 0 && responseMessage) {
+        const followUp = await openai.chat.completions.create({
+          model: env.OPENAI_MODEL,
+          messages: [...messages, responseMessage, ...toolMessages],
+        });
+        text = followUp.choices[0]?.message?.content || '';
+      }
+      if (!text) text = 'FinOps analysis complete.';
       sendEvent('TEXT_MESSAGE_CONTENT', { delta: text, content: text });
       sendEvent('RUN_FINISHED', { status: 'COMPLETED' });
       res.end();
@@ -279,6 +348,7 @@ Your role:
       const choice = response.choices[0];
       const responseMessage = choice?.message;
       const toolResults: Array<{ name: string; result: unknown }> = [];
+      const toolMessages: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] = [];
 
       if (responseMessage?.tool_calls && responseMessage.tool_calls.length > 0) {
         for (const toolCall of responseMessage.tool_calls) {
@@ -290,16 +360,31 @@ Your role:
           }
            const result = await executeAgentTool(toolCall.function.name, parsedArgs, projectId);
           toolResults.push({ name: toolCall.function.name, result });
+          toolMessages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result),
+          });
         }
+      }
+
+      let content = responseMessage?.content || '';
+      if (toolMessages.length > 0 && responseMessage) {
+        const followUp = await openai.chat.completions.create({
+          model: env.OPENAI_MODEL,
+          messages: [...messages, responseMessage, ...toolMessages],
+        });
+        content = followUp.choices[0]?.message?.content || '';
+      }
+      if (!content) {
+        content = toolResults.length > 0
+          ? `Executed tools: ${toolResults.map((t) => t.name).join(', ')}`
+          : 'FinOps analysis complete.';
       }
 
       res.status(200).json({
         role: 'assistant',
-        content:
-          responseMessage?.content ||
-          (toolResults.length > 0
-            ? `Executed tools: ${toolResults.map((t) => t.name).join(', ')}`
-            : 'FinOps analysis complete.'),
+        content,
         toolCalls: responseMessage?.tool_calls || [],
         toolResults,
       });

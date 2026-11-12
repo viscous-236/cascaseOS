@@ -23,6 +23,7 @@ import {
 } from '../services/channel3Service.js';
 import * as dbModule from '../db/database.js';
 import { QuoteRepo } from '../db/database.js';
+import { evaluateRecoveryAndSupplierAction } from '../engine/policyEngine.js';
 import type { CascadeTask } from '../types/domain.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -224,11 +225,41 @@ describe('TASK-016: channel3Service (REQ-006, CON-003)', () => {
     expect(quote.availability_status).toBe('IN_STOCK');
     expect(quote.image_url).toBe('https://img.example.com/clean.png');
 
+    // Channel3 does not quote freight or tax. Unknown costs must stay null so
+    // the policy firewall fails closed instead of treating them as $0.00.
+    expect(quote.shipping_minor).toBeNull();
+    expect(quote.tax_minor).toBeNull();
+
+    const policy = evaluateRecoveryAndSupplierAction({
+      taskToPromote: {
+        id: mockTask.task_id,
+        hard_dependencies: [],
+        materials_in_warehouse: true,
+      },
+      completedTaskIds: [],
+      phaseCurrency: 'USD',
+      phaseBudgetMaxMinor: 160000,
+      historicalUnitPriceMinor: 38000,
+      maxAllowedVariancePct: 10.0,
+      proposedQuote: {
+        currency: 'USD',
+        unitPriceMinor: quote.unit_price_minor,
+        quantity: quote.quantity,
+        shippingMinor: quote.shipping_minor,
+        taxMinor: quote.tax_minor,
+      },
+      hasExplicitUserApproval: true,
+    });
+    expect(policy.decision).toBe('BLOCK');
+    expect(policy.reason_codes).toContain('UNKNOWN_COST_FIELD');
+
     // Verify persisted into SQLite
     const persisted = QuoteRepo.findByTask(mockTask.task_id);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]?.quote_id).toBe(quote.quote_id);
     expect(persisted[0]?.total_minor).toBe(139600);
+    expect(persisted[0]?.shipping_minor).toBeNull();
+    expect(persisted[0]?.tax_minor).toBeNull();
   });
 
   it('searchAndAuditSupplierProducts: uses SQLite cache when forceRefresh is false (CON-003)', async () => {
